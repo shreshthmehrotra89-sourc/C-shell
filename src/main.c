@@ -8,6 +8,7 @@
 #include "hop.h"
 #include "reveal.h"
 #include "locate.h"
+#include "execute.h"
 
 int main(void)
 {
@@ -207,7 +208,41 @@ int main(void)
                 }
             }
         }
-                                                                                         
+
+                /*
+         * Execute an external command.
+         *
+         * Only execute the first command group.
+         * Stop at |, ;, or &.
+         */
+        if (tokens != NULL && tokens->type == TOKEN_WORD && strcmp(tokens->value, "hop") != 0 && strcmp(tokens->value, "reveal") != 0 &&
+            strcmp(tokens->value, "peek") != 0 && strcmp(tokens->value, "locate") != 0)
+        {
+            int argc = 0;
+            Token *current = tokens;
+            while (current != NULL && current->type == TOKEN_WORD)
+            {
+                argc++;
+                current = current->next;
+            }
+            if (argc > 0)
+            {
+                char **args = malloc(sizeof(char *) * (argc + 1));
+                if (args != NULL)
+                {
+                    current = tokens;
+                    for (int i = 0; i < argc; i++)
+                    {
+                        args[i] = current->value;
+                        current = current->next;
+                    }
+                    args[argc] = NULL;
+                    execute_command(args);
+                    free(args);
+                }
+            }
+        }
+                                                                                       
         free_tokens(tokens);
     }
 
