@@ -20,11 +20,11 @@ typedef struct Token
 } Token;
 
 //converts raw input line to linked list of tokens
-int lex_line(const char *line, Token **tokens);
+int lex_line(char *line, Token **tokens);
 
 // Free the entire token list 
 void free_tokens(Token *tokens);
 
-void print_tokens(const Token *tokens);
+void print_tokens(Token *tokens);
 
 #endif

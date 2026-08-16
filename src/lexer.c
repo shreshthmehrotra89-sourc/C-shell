@@ -20,7 +20,7 @@ int append_char(char **buffer,size_t *length,size_t *capacity,char c)
 
 // Create a new token and append it to the linked list.
  
-int add_token(Token **head,Token **tail,TokenType type,const char *value)
+int add_token(Token **head,Token **tail,TokenType type,char *value)
 {
     Token *token = malloc(sizeof(Token));
     token->type = type;
@@ -73,25 +73,25 @@ int lex_line(char *line, Token **tokens)
         }
         if (line[i] == '|') 
         {
-            add_token(&head, &tail, TOKEN_PIPE, NULL) 
+            add_token(&head, &tail, TOKEN_PIPE, NULL) ;
             i++;
             continue;
         }
         if (line[i] == '&') 
         {
-            add_token(&head, &tail, TOKEN_AMP, NULL)
+            add_token(&head, &tail, TOKEN_AMP, NULL);
             i++;
             continue;
         }
         if (line[i] == ';') 
         {
-            add_token(&head, &tail, TOKEN_SEMI, NULL)
+            add_token(&head, &tail, TOKEN_SEMI, NULL);
             i++;
             continue;
         }
         if (line[i] == '<') 
         {
-            add_token(&head, &tail, TOKEN_LT, NULL)
+            add_token(&head, &tail, TOKEN_LT, NULL);
             i++;
             continue;
         }
@@ -100,12 +100,12 @@ int lex_line(char *line, Token **tokens)
         {
             if (line[i + 1] == '>') 
             {
-                add_token(&head, &tail, TOKEN_GTGT, NULL)
+                add_token(&head, &tail, TOKEN_GTGT, NULL);
                 i += 2;
             } 
             else 
             {
-                add_token(&head, &tail, TOKEN_GT, NULL)
+                add_token(&head, &tail, TOKEN_GT, NULL);
                 i++;
             }
             continue;
@@ -132,7 +132,7 @@ int lex_line(char *line, Token **tokens)
                     return -1;
                 }
                 i++;
-                append_char(&buffer,&length,&capacity,line[i])
+                append_char(&buffer,&length,&capacity,line[i]);
                 i++;
                 continue;
             }
@@ -153,19 +153,19 @@ int lex_line(char *line, Token **tokens)
                         }
                         if (line[i + 1] == '"' || line[i + 1] == '\\') 
                         {
-                            append_char(&buffer,&length,&capacity,line[i + 1])
+                            append_char(&buffer,&length,&capacity,line[i + 1]);
                             i += 2;
                         }
                         //For something like \n:it stays as TWO characters:backslash + n
                         else 
                         {
-                            append_char(&buffer,&length,&capacity,'\\') 
-                            append_char(&buffer,&length,&capacity,line[i + 1])
+                            append_char(&buffer,&length,&capacity,'\\') ;
+                            append_char(&buffer,&length,&capacity,line[i + 1]);
                             i += 2;
                         }
                         continue;
                     }
-                    append_char(&buffer,&length,&capacity,line[i])
+                    append_char(&buffer,&length,&capacity,line[i]);
                     i++;
                 }
                 if (line[i] != '"') 
@@ -184,7 +184,7 @@ int lex_line(char *line, Token **tokens)
                 //Everything inside single quotes is copied
                 while (line[i] != '\0' &&  line[i] != '\'') 
                 {
-                    append_char(&buffer,&length,&capacity,line[i])
+                    append_char(&buffer,&length,&capacity,line[i]);
                     i++;
                 }
                 if (line[i] != '\'') 
@@ -197,7 +197,7 @@ int lex_line(char *line, Token **tokens)
                 continue;
             }
             started_word = 1;
-            append_char(&buffer,&length,&capacity,line[i])
+            append_char(&buffer,&length,&capacity,line[i]);
             i++;
         }
         if (started_word) 
@@ -209,7 +209,7 @@ int lex_line(char *line, Token **tokens)
                 free_tokens(head);
                 return -1;
             }
-            add_token(&head,&tail,TOKEN_WORD,buffer)
+            add_token(&head,&tail,TOKEN_WORD,buffer);
             free(buffer);
         }
     }
@@ -230,7 +230,7 @@ void free_tokens(Token *tokens)
 /*
  * Debugging function.
  */
-void print_tokens(const Token *tokens)
+void print_tokens(Token *tokens)
 {
     while (tokens != NULL) 
     {
