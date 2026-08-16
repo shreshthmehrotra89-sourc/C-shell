@@ -2,5 +2,6 @@
 #define HOP_H
 
 void hop_command(char **args, int argc);
+char *get_previous_directory(void);
 
 #endif

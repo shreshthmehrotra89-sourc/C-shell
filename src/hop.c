@@ -204,3 +204,10 @@ void hop_command(char **args, int argc)
     for (int i = 0; i < argc; i++)
     hop_one(args[i]);
 }
+
+char *get_previous_directory(void)
+{
+    if (!has_previous)
+    return NULL;
+    return previous_dir;
+}
