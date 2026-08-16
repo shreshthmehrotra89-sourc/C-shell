@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
+#include "peek.h"
 #include "prompt.h"
 #include "lexer.h"
 #include "parser.h"
@@ -20,7 +20,11 @@ int main(void)
         print_prompt();
 
         if (getline(&line, &size, stdin) == -1)
-            break;
+        {
+            clearerr(stdin);
+            printf("\n");
+            continue;
+        }
 
         Token *tokens = NULL;
 
@@ -81,8 +85,6 @@ int main(void)
                 }
             }
         }
-
-
         /*
          * Execute the reveal built-in.
          */
@@ -125,8 +127,46 @@ int main(void)
                 }
             }
         }
+        //Execute the peek built-in.
+ 
+        if (tokens != NULL && tokens->type == TOKEN_WORD && strcmp(tokens->value, "peek") == 0)
+        {
+            int argc = 0;
+            Token *current = tokens->next;
 
+            while (current != NULL)
+            {
+                if (current->type != TOKEN_WORD)
+                {
+                    argc = -1;
+                    break;
+                }
 
+                argc++;
+                current = current->next;
+            }
+
+            if (argc >= 0)
+            {
+                char **args = malloc(sizeof(char *) * argc);
+
+                if (argc == 0 || args != NULL)
+                {
+                    current = tokens->next;
+
+                    for (int i = 0; i < argc; i++)
+                    {
+                        args[i] = current->value;
+                        current = current->next;
+                    }
+
+                    peek_command(args, argc);
+
+                    free(args);
+                }
+            }
+        }
+                                                                                         
         free_tokens(tokens);
     }
 
