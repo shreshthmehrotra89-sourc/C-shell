@@ -7,6 +7,7 @@
 #include "parser.h"
 #include "hop.h"
 #include "reveal.h"
+#include "locate.h"
 
 int main(void)
 {
@@ -161,6 +162,46 @@ int main(void)
                     }
 
                     peek_command(args, argc);
+
+                    free(args);
+                }
+            }
+        }
+        /*
+        * Execute the locate built-in.
+        */
+        if (tokens != NULL && tokens->type == TOKEN_WORD && strcmp(tokens->value, "locate") == 0)
+        {
+            int argc = 0;
+            Token *current = tokens->next;
+
+            while (current != NULL)
+            {
+                if (current->type != TOKEN_WORD)
+                {
+                    argc = -1;
+                    break;
+                }
+
+                argc++;
+                current = current->next;
+            }
+
+            if (argc >= 0)
+            {
+                char **args = malloc(sizeof(char *) * argc);
+
+                if (argc == 0 || args != NULL)
+                {
+                    current = tokens->next;
+
+                    for (int i = 0; i < argc; i++)
+                    {
+                        args[i] = current->value;
+                        current = current->next;
+                    }
+
+                    locate_command(args, argc);
 
                     free(args);
                 }
