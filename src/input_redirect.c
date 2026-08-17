@@ -46,15 +46,5 @@ int handle_input_redirection(char **files, int count)
     }
 
     lseek(temp_fd, 0, SEEK_SET);
-    // make combined file to stdin
-    if (dup2(temp_fd, STDIN_FILENO) == -1)
-    {
-        perror("cshell");
-        close(temp_fd);
-        unlink("/tmp/cshell_input.tmp");
-        return -1;
-    }
-    close(temp_fd);
-    unlink("/tmp/cshell_input.tmp");
-    return 0;
+    return temp_fd;
 }

@@ -10,12 +10,12 @@
 #include "locate.h"
 #include "execute.h"
 #include "input_redirect.h"
+#include "output_redirect.h"
 
 int main(void)
 {
     char *line = NULL;
     size_t size = 0;
-
     init_prompt();
 
     while (1)
@@ -28,16 +28,13 @@ int main(void)
             printf("\n");
             continue;
         }
-
         Token *tokens = NULL;
-
         if (lex_line(line, &tokens) != 0)
         {
             printf("cshell: invalid syntax\n");
             free_tokens(tokens);
             continue;
         }
-
         if (!parse_line(tokens))
         {
             printf("cshell: invalid syntax\n");
@@ -45,17 +42,10 @@ int main(void)
             continue;
         }
 
-
-        /*
-         * Execute the hop built-in.
-         */
-        if (tokens != NULL &&
-            tokens->type == TOKEN_WORD &&
-            strcmp(tokens->value, "hop") == 0)
+        if (tokens != NULL && tokens->type == TOKEN_WORD && strcmp(tokens->value, "hop") == 0)
         {
             int argc = 0;
             Token *current = tokens->next;
-
             while (current != NULL)
             {
                 if (current->type != TOKEN_WORD)
@@ -63,41 +53,29 @@ int main(void)
                     argc = -1;
                     break;
                 }
-
                 argc++;
                 current = current->next;
             }
-
             if (argc >= 0)
             {
                 char **args = malloc(sizeof(char *) * argc);
-
                 if (argc == 0 || args != NULL)
                 {
                     current = tokens->next;
-
                     for (int i = 0; i < argc; i++)
                     {
                         args[i] = current->value;
                         current = current->next;
                     }
-
                     hop_command(args, argc);
-
                     free(args);
                 }
             }
         }
-        /*
-         * Execute the reveal built-in.
-         */
-        if (tokens != NULL &&
-            tokens->type == TOKEN_WORD &&
-            strcmp(tokens->value, "reveal") == 0)
+        if (tokens != NULL && tokens->type == TOKEN_WORD && strcmp(tokens->value, "reveal") == 0)
         {
             int argc = 0;
             Token *current = tokens->next;
-
             while (current != NULL)
             {
                 if (current->type != TOKEN_WORD)
@@ -105,38 +83,29 @@ int main(void)
                     argc = -1;
                     break;
                 }
-
                 argc++;
                 current = current->next;
             }
-
             if (argc >= 0)
             {
                 char **args = malloc(sizeof(char *) * argc);
-
                 if (argc == 0 || args != NULL)
                 {
                     current = tokens->next;
-
                     for (int i = 0; i < argc; i++)
                     {
                         args[i] = current->value;
                         current = current->next;
                     }
-
                     reveal_command(args, argc);
-
                     free(args);
                 }
             }
         }
-        //Execute the peek built-in.
- 
         if (tokens != NULL && tokens->type == TOKEN_WORD && strcmp(tokens->value, "peek") == 0)
         {
             int argc = 0;
             Token *current = tokens->next;
-
             while (current != NULL)
             {
                 if (current->type != TOKEN_WORD)
@@ -144,39 +113,29 @@ int main(void)
                     argc = -1;
                     break;
                 }
-
                 argc++;
                 current = current->next;
             }
-
             if (argc >= 0)
             {
                 char **args = malloc(sizeof(char *) * argc);
-
                 if (argc == 0 || args != NULL)
                 {
                     current = tokens->next;
-
                     for (int i = 0; i < argc; i++)
                     {
                         args[i] = current->value;
                         current = current->next;
                     }
-
                     peek_command(args, argc);
-
                     free(args);
                 }
             }
         }
-        /*
-        * Execute the locate built-in.
-        */
         if (tokens != NULL && tokens->type == TOKEN_WORD && strcmp(tokens->value, "locate") == 0)
         {
             int argc = 0;
             Token *current = tokens->next;
-
             while (current != NULL)
             {
                 if (current->type != TOKEN_WORD)
@@ -184,137 +143,129 @@ int main(void)
                     argc = -1;
                     break;
                 }
-
                 argc++;
                 current = current->next;
             }
-
             if (argc >= 0)
             {
                 char **args = malloc(sizeof(char *) * argc);
-
                 if (argc == 0 || args != NULL)
                 {
                     current = tokens->next;
-
                     for (int i = 0; i < argc; i++)
                     {
                         args[i] = current->value;
                         current = current->next;
                     }
-
                     locate_command(args, argc);
-
                     free(args);
                 }
             }
         }
 
-                /*
-         * Execute an external command.
-         *
-         * Only execute the first command group.
-         * Stop at |, ;, or &.
-         */
-        /*
- * Execute an external command.
- *
- * Separate normal arguments from input redirection files.
- */
-if (tokens != NULL &&
-    tokens->type == TOKEN_WORD &&
-    strcmp(tokens->value, "hop") != 0 &&
-    strcmp(tokens->value, "reveal") != 0 &&
-    strcmp(tokens->value, "peek") != 0 &&
-    strcmp(tokens->value, "locate") != 0)
-{
-    int argc = 0;
-    int input_count = 0;
-
-    Token *current = tokens;
-
-    /*
-     * First count arguments and input files.
-     */
-    while (current != NULL &&
-           current->type != TOKEN_PIPE &&
-           current->type != TOKEN_SEMI &&
-           current->type != TOKEN_AMP)
-    {
-        if (current->type == TOKEN_WORD)
+        if (tokens != NULL && tokens->type == TOKEN_WORD && strcmp(tokens->value, "hop") != 0 &&
+            strcmp(tokens->value, "reveal") != 0 &&
+            strcmp(tokens->value, "peek") != 0 &&
+            strcmp(tokens->value, "locate") != 0)
         {
-            argc++;
-        }
-        else if (current->type == TOKEN_LT)
-        {
-            current = current->next;
+            int argc = 0;
+            int input_count = 0;
+            int output_count = 0;
+            Token *current = tokens;
 
-            if (current != NULL && current->type == TOKEN_WORD)
+            while (current != NULL && current->type != TOKEN_PIPE && current->type != TOKEN_SEMI &&
+                   current->type != TOKEN_AMP)
             {
-                input_count++;
-            }
-        }
-
-        current = current->next;
-    }
-
-    /*
-     * Allocate argument array.
-     */
-    char **args = malloc(sizeof(char *) * (argc + 1));
-
-    /*
-     * Allocate input file array.
-     */
-    char **input_files = NULL;
-
-    if (input_count > 0)
-    {
-        input_files = malloc(sizeof(char *) * input_count);
-    }
-
-    if (args != NULL && (input_count == 0 || input_files != NULL))
-    {
-        int arg_index = 0;
-        int input_index = 0;
-
-        current = tokens;
-
-        while (current != NULL &&
-               current->type != TOKEN_PIPE &&
-               current->type != TOKEN_SEMI &&
-               current->type != TOKEN_AMP)
-        {
-            if (current->type == TOKEN_WORD)
-            {
-                args[arg_index++] = current->value;
-            }
-            else if (current->type == TOKEN_LT)
-            {
-                current = current->next;
-
-                if (current != NULL && current->type == TOKEN_WORD)
+                if (current->type == TOKEN_WORD)
+                argc++;
+                else if (current->type == TOKEN_LT)
                 {
-                    input_files[input_index++] = current->value;
+                    current = current->next;
+                    if (current != NULL && current->type == TOKEN_WORD)
+                    input_count++;
                 }
+                else if (current->type == TOKEN_GT || current->type == TOKEN_GTGT)
+                {
+                    current = current->next;
+                    if (current != NULL && current->type == TOKEN_WORD)
+                    output_count++;
+                }
+                current = current->next;
             }
 
-            current = current->next;
+            char **args = malloc(sizeof(char *) * (argc + 1));
+            char **input_files = NULL;
+            if (input_count > 0)
+            input_files =malloc(sizeof(char *) * input_count);
+            char **output_files = NULL;
+            int *output_append = NULL;
+
+            if (output_count > 0)
+            {
+                output_files =malloc(sizeof(char *) * output_count);
+                output_append =malloc(sizeof(int) * output_count);
+            }
+            if (args != NULL && (input_count == 0 || input_files != NULL) && (output_count == 0 ||
+                 (output_files != NULL &&
+                  output_append != NULL)))
+            {
+                int arg_index = 0;
+                int input_index = 0;
+                int output_index = 0;
+                current = tokens;
+
+                while (current != NULL &&
+                       current->type != TOKEN_PIPE &&
+                       current->type != TOKEN_SEMI &&
+                       current->type != TOKEN_AMP)
+                {
+                    if (current->type == TOKEN_WORD)
+                    args[arg_index++] = current->value;
+                    else if (current->type == TOKEN_LT)
+                    {
+                        current = current->next;
+                        if (current != NULL && current->type == TOKEN_WORD)
+                        input_files[input_index++] =current->value;
+                    }
+                    else if (current->type == TOKEN_GT)
+                    {
+                        current = current->next;
+                        if (current != NULL && current->type == TOKEN_WORD)
+                        {
+                            output_files[output_index] =current->value;
+                            output_append[output_index] = 0;
+                            output_index++;
+                        }
+                    }
+                    else if (current->type == TOKEN_GTGT)
+                    {
+                        current = current->next;
+                        if (current != NULL &&  current->type == TOKEN_WORD)
+                        {
+                            output_files[output_index] =current->value;
+                            output_append[output_index] = 1;
+                            output_index++;
+                        }
+                    }
+                    current = current->next;
+                }
+                args[arg_index] = NULL;
+                execute_command(args,input_files,input_count,output_files,output_append,output_count);
+                free(args);
+                free(input_files);
+                free(output_files);
+                free(output_append);
+            }
+            else
+            {
+                free(args);
+                free(input_files);
+                free(output_files);
+                free(output_append);
+            }
         }
-
-        args[arg_index] = NULL;
-
-        execute_command(args, input_files, input_count);
-
-        free(args);
-        free(input_files);
-    }
-}
-                                                                                       
         free_tokens(tokens);
     }
-
     free(line);
-
     return 0;
 }
