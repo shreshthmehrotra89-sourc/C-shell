@@ -9,6 +9,7 @@
 #include "reveal.h"
 #include "locate.h"
 #include "execute.h"
+#include "input_redirect.h"
 
 int main(void)
 {
@@ -215,33 +216,100 @@ int main(void)
          * Only execute the first command group.
          * Stop at |, ;, or &.
          */
-        if (tokens != NULL && tokens->type == TOKEN_WORD && strcmp(tokens->value, "hop") != 0 && strcmp(tokens->value, "reveal") != 0 &&
-            strcmp(tokens->value, "peek") != 0 && strcmp(tokens->value, "locate") != 0)
+        /*
+ * Execute an external command.
+ *
+ * Separate normal arguments from input redirection files.
+ */
+if (tokens != NULL &&
+    tokens->type == TOKEN_WORD &&
+    strcmp(tokens->value, "hop") != 0 &&
+    strcmp(tokens->value, "reveal") != 0 &&
+    strcmp(tokens->value, "peek") != 0 &&
+    strcmp(tokens->value, "locate") != 0)
+{
+    int argc = 0;
+    int input_count = 0;
+
+    Token *current = tokens;
+
+    /*
+     * First count arguments and input files.
+     */
+    while (current != NULL &&
+           current->type != TOKEN_PIPE &&
+           current->type != TOKEN_SEMI &&
+           current->type != TOKEN_AMP)
+    {
+        if (current->type == TOKEN_WORD)
         {
-            int argc = 0;
-            Token *current = tokens;
-            while (current != NULL && current->type == TOKEN_WORD)
+            argc++;
+        }
+        else if (current->type == TOKEN_LT)
+        {
+            current = current->next;
+
+            if (current != NULL && current->type == TOKEN_WORD)
             {
-                argc++;
-                current = current->next;
-            }
-            if (argc > 0)
-            {
-                char **args = malloc(sizeof(char *) * (argc + 1));
-                if (args != NULL)
-                {
-                    current = tokens;
-                    for (int i = 0; i < argc; i++)
-                    {
-                        args[i] = current->value;
-                        current = current->next;
-                    }
-                    args[argc] = NULL;
-                    execute_command(args);
-                    free(args);
-                }
+                input_count++;
             }
         }
+
+        current = current->next;
+    }
+
+    /*
+     * Allocate argument array.
+     */
+    char **args = malloc(sizeof(char *) * (argc + 1));
+
+    /*
+     * Allocate input file array.
+     */
+    char **input_files = NULL;
+
+    if (input_count > 0)
+    {
+        input_files = malloc(sizeof(char *) * input_count);
+    }
+
+    if (args != NULL && (input_count == 0 || input_files != NULL))
+    {
+        int arg_index = 0;
+        int input_index = 0;
+
+        current = tokens;
+
+        while (current != NULL &&
+               current->type != TOKEN_PIPE &&
+               current->type != TOKEN_SEMI &&
+               current->type != TOKEN_AMP)
+        {
+            if (current->type == TOKEN_WORD)
+            {
+                args[arg_index++] = current->value;
+            }
+            else if (current->type == TOKEN_LT)
+            {
+                current = current->next;
+
+                if (current != NULL && current->type == TOKEN_WORD)
+                {
+                    input_files[input_index++] = current->value;
+                }
+            }
+
+            current = current->next;
+        }
+
+        args[arg_index] = NULL;
+
+        execute_command(args, input_files, input_count);
+
+        free(args);
+        free(input_files);
+    }
+}
                                                                                        
         free_tokens(tokens);
     }

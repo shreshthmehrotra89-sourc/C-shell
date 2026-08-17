@@ -5,8 +5,9 @@
 #include <sys/wait.h>
 #include <string.h>
 #include "execute.h"
+#include "input_redirect.h"
 
-void execute_command(char **argv)
+void execute_command(char **argv,char **input_files, int input_count)
 {
     if (argv == NULL || argv[0] == NULL)
     return;
@@ -40,7 +41,6 @@ void execute_command(char **argv)
         
     }
     pid_t pid = fork();
-
     if (pid < 0)
     {
         perror("fork");
@@ -49,6 +49,11 @@ void execute_command(char **argv)
     if (pid == 0)
     {
         //child process
+        if (input_count > 0)
+        {
+            if (handle_input_redirection(input_files, input_count) == -1)
+            exit(EXIT_FAILURE);
+        }
         if (strchr(argv[0], '/') != NULL)
         execv(argv[0], argv);
         else
