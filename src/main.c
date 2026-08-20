@@ -11,6 +11,7 @@
 #include "execute.h"
 #include "input_redirect.h"
 #include "output_redirect.h"
+#include "pipe.h"
 
 int main(void)
 {
@@ -41,6 +42,29 @@ int main(void)
             free_tokens(tokens);
             continue;
         }
+
+        int has_pipe = 0;
+
+Token *pipe_check = tokens;
+
+while (pipe_check != NULL)
+{
+    if (pipe_check->type == TOKEN_PIPE)
+    {
+        has_pipe = 1;
+        break;
+    }
+
+    pipe_check = pipe_check->next;
+}
+
+if (has_pipe)
+{
+    execute_pipeline(tokens);
+
+    free_tokens(tokens);
+    continue;
+}
 
         if (tokens != NULL && tokens->type == TOKEN_WORD && strcmp(tokens->value, "hop") == 0)
         {
