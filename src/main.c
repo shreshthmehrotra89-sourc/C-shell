@@ -15,6 +15,7 @@
 
 int main(void)
 {
+    initialize_hop();
     char *line = NULL;
     size_t size = 0;
     init_prompt();

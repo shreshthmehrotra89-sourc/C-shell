@@ -12,6 +12,13 @@
 
 char previous_dir[MAX_PATH_LEN] = "";
 int has_previous = 0;
+char shell_start_dir[MAX_PATH_LEN] = "";
+
+void initialize_hop(void)
+{
+    if (getcwd(shell_start_dir, sizeof(shell_start_dir)) == NULL)
+    shell_start_dir[0] = '\0';
+}
 
 void get_history_file(char *path)
 {
@@ -155,11 +162,10 @@ void hop_one(char *arg)
     //hop ~
     if (strcmp(arg, "~") == 0)
     {
-        char *home = getenv("HOME");
-        if (home != NULL)
+        if (shell_start_dir[0] != '\0')
         {
-            if (!change_directory(home))
-                printf("hop: no such directory\n");
+            if (!change_directory(shell_start_dir))
+            printf("hop: no such directory\n");
         }
         return;
     }

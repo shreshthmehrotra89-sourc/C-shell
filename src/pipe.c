@@ -12,8 +12,6 @@
 
 #define MAX_OUTPUT_FILES 100
 #define MAX_PATH_LENGTH 4096
-
-
 //info about one pipe input files,output files,flags,count for each command
 typedef struct
 {
