@@ -55,10 +55,9 @@ while (pipe_check != NULL)
         has_pipe = 1;
         break;
     }
-
     pipe_check = pipe_check->next;
 }
-
+//completely different set of execution if there is a pipe in command
 if (has_pipe)
 {
     execute_pipeline(tokens);

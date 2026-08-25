@@ -19,7 +19,6 @@ int append_char(char **buffer,size_t *length,size_t *capacity,char c)
 }
 
 // Create a new token and append it to the linked list.
- 
 int add_token(Token **head,Token **tail,TokenType type,char *value)
 {
     Token *token = malloc(sizeof(Token));
@@ -227,9 +226,7 @@ void free_tokens(Token *tokens)
         tokens = next;
     }
 }
-/*
- * Debugging function.
- */
+/*//for debugging
 void print_tokens(Token *tokens)
 {
     while (tokens != NULL) 
@@ -261,4 +258,4 @@ void print_tokens(Token *tokens)
         tokens = tokens->next;
     }
     printf("\n");
-}
+}*/
