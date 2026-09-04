@@ -3,6 +3,6 @@
 
 #include "parser.h"
 
-void execute_pipeline(Token *tokens);
+int execute_pipeline(Token *tokens);
 
 #endif

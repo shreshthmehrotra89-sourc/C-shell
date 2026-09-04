@@ -13,10 +13,10 @@
 #define MAX_OUTPUT_FILES 100
 
 
-void execute_command(char **argv,char **input_files,int input_count,char **output_files,int *output_append,int output_count)
+int execute_command(char **argv,char **input_files,int input_count,char **output_files,int *output_append,int output_count)
 {
     if (argv == NULL || argv[0] == NULL)
-    return;
+    return -1;
 
     char *command = argv[0];
     char local_path[4096];
@@ -27,7 +27,7 @@ void execute_command(char **argv,char **input_files,int input_count,char **outpu
         if (command[0] == '\0')
         {
             printf("cshell: command not found ()\n");
-            return;
+            return -1;
         }
         argv[0] = command;
     }
@@ -36,7 +36,7 @@ void execute_command(char **argv,char **input_files,int input_count,char **outpu
         if (access(command, X_OK) != 0)
         {
             printf("cshell: command not found (%s)\n", command);
-            return;
+            return -1;
         }
     }
     else
@@ -51,7 +51,7 @@ void execute_command(char **argv,char **input_files,int input_count,char **outpu
     {
         input_fd = handle_input_redirection(input_files,input_count);
         if (input_fd == -1)
-        return;
+        return -1;
     }
     int output_fds[MAX_OUTPUT_FILES];
     if (output_count > 0)
@@ -63,7 +63,7 @@ void execute_command(char **argv,char **input_files,int input_count,char **outpu
                 close(input_fd);
                 unlink("/tmp/cshell_input.tmp");
             }
-            return;
+            return -1;
         }
     }
     int output_temp_fd = -1;
@@ -80,7 +80,7 @@ void execute_command(char **argv,char **input_files,int input_count,char **outpu
             }
             for (int i = 0; i < output_count; i++)
             close(output_fds[i]);
-            return;
+            return -1;
         }
     }
     pid_t pid = fork();
@@ -111,7 +111,8 @@ void execute_command(char **argv,char **input_files,int input_count,char **outpu
         printf("cshell: command not found (%s)\n", command);
         exit(EXIT_FAILURE);
     }
-    waitpid(pid, NULL, 0);
+    int status;
+    waitpid(pid, &status, 0);
     if (input_fd != -1)
     {
         close(input_fd);
@@ -125,5 +126,5 @@ void execute_command(char **argv,char **input_files,int input_count,char **outpu
         for (int i = 0; i < output_count; i++)
         close(output_fds[i]);
     }
-
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
 }

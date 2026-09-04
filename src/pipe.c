@@ -442,10 +442,10 @@ void execute_pipeline_child(PipelineCommand *command,int command_index,int comma
 }
 
 //start execution of pipeline
-void execute_pipeline(Token *tokens)
+int execute_pipeline(Token *tokens)
 {
     if (tokens == NULL)
-        return;
+        return -1;
     int command_count=count_commands(tokens);
     int pipe_count=command_count - 1;
     int pipe_fds[pipe_count][2];
@@ -461,7 +461,7 @@ void execute_pipeline(Token *tokens)
                 close(pipe_fds[j][0]);
                 close(pipe_fds[j][1]);
             }
-            return;
+            return -1;
         }
     }
     //Allocate information for every command.
@@ -474,7 +474,7 @@ void execute_pipeline(Token *tokens)
             close(pipe_fds[i][0]);
             close(pipe_fds[i][1]);
         }
-        return;
+        return -1;
     }
     //Parse every command BEFORE forking.
     Token *current = tokens;
@@ -492,7 +492,7 @@ void execute_pipeline(Token *tokens)
                 close(pipe_fds[j][0]);
                 close(pipe_fds[j][1]);
             }
-            return;
+            return -1;
         }
         current = next_start;
     }
@@ -518,7 +518,7 @@ void execute_pipeline(Token *tokens)
                     close(pipe_fds[j][0]);
                     close(pipe_fds[j][1]);
                 }
-                return;
+                return -1;
             }
         }
     }
@@ -538,7 +538,7 @@ void execute_pipeline(Token *tokens)
             close(pipe_fds[i][0]);
             close(pipe_fds[i][1]);
         }
-        return;
+        return -1;
     }
     //fork every command
     for (int i = 0;i < command_count;i++)
@@ -566,7 +566,7 @@ void execute_pipeline(Token *tokens)
                 free_command(&commands[j]);
             }
             free(commands);
-            return;
+            return -1;
         }
         if (pid == 0)
         {
@@ -582,8 +582,14 @@ void execute_pipeline(Token *tokens)
         close(pipe_fds[i][1]);
     }
 
+    int failed = 0;
     for (int i = 0;i < command_count;i++)
-    waitpid(pids[i], NULL, 0);
+    {
+        int status;
+        waitpid(pids[i], &status, 0);
+        if(!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        failed = 1;
+    }
  
     for (int i = 0;i < command_count;i++)
     {
@@ -598,4 +604,7 @@ void execute_pipeline(Token *tokens)
     free_command(&commands[i]);
     free(commands);
     free(pids);
+    if (failed)
+    return -1;
+    return 0;
 }
