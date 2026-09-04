@@ -12,6 +12,8 @@
 #include "input_redirect.h"
 #include "output_redirect.h"
 #include "pipe.h"
+#include "background.h"
+#include <errno.h>
 
 int execute_one_command(Token *tokens)
 {
@@ -233,6 +235,7 @@ int execute_one_command(Token *tokens)
 int main(void)
 {
     initialize_hop();
+    init_background();
     char *line = NULL;
     size_t size = 0;
     init_prompt();
@@ -242,10 +245,25 @@ int main(void)
         print_prompt();
         if (getline(&line, &size, stdin) == -1)
         {
+            if (errno == EINTR)
+            {
+                clearerr(stdin);
+
+        /*
+         * SIGCHLD interrupted getline().
+         * Background processes may have completed.
+         * Print their completion messages before
+         * showing the next prompt.
+         */
+                print_pending_background_jobs();
+
+                continue;
+            }
+
             clearerr(stdin);
             printf("\n");
             continue;
-        }
+        }  
         Token *tokens = NULL;
         if (lex_line(line, &tokens) != 0)
         {
@@ -259,86 +277,125 @@ int main(void)
             free_tokens(tokens);
             continue;
         }
-        //Execute every command separated by ';'
-        /* Execute every command separated by ';' */
-
+        /*
+        * Execute commands separated by ';' and '&'.
+        *
+        * ';' -> foreground
+        *
+        * '&' -> background
+        */
         Token *current = tokens;
 
         while (current != NULL)
         {
             Token *command_start = current;
 
-            /*
-            * Find the semicolon and also remember
-            * the token immediately before it.
-            */
-            Token *semi = current;
+            Token *separator = current;
             Token *prev = NULL;
 
-            while (semi != NULL && semi->type != TOKEN_SEMI)
+    /*
+     * Find either:
+     *
+     * TOKEN_SEMI
+     *
+     * or
+     *
+     * TOKEN_AMP
+     */
+            while (separator != NULL &&
+           separator->type != TOKEN_SEMI &&
+           separator->type != TOKEN_AMP)
             {       
-                prev = semi;
-                semi = semi->next;
+                prev = separator;
+                separator = separator->next;
             }
 
-            /*
-            * next_command is the first token after ';'
-            */
+    /*
+     * Remember what comes after the separator.
+     */
             Token *next_command = NULL;
 
-            if (semi != NULL)
+            if (separator != NULL)
+            next_command = separator->next;
+
+    /*
+     * Disconnect the current command from the rest
+     * of the token list.
+     *
+     * Example:
+     *
+     * echo hello -> AMP -> sleep -> 10
+     *
+     * becomes:
+     *
+     * echo hello -> NULL
+     */
+            if (separator != NULL && prev != NULL)
+            prev->next = NULL;
+
+    /*
+     * Determine whether this command should run
+     * in the background.
+     */
+            int is_background = 0;
+
+            if (separator != NULL &&
+            separator->type == TOKEN_AMP)
             {
-                next_command = semi->next;
+                is_background = 1;
+            }
+
+            int result;
+
+            if (is_background)
+            {
+        /*
+         * Background command.
+         *
+         * We do NOT wait here.
+         */
+                result = launch_background_command(command_start);
+            }
+            else
+            {
+        /*
+         * Foreground command.
+         */
+
+                set_foreground_running(1);
+
+                result = execute_one_command(command_start);
+
+                set_foreground_running(0);
 
         /*
-         * IMPORTANT:
-         *
-         * Disconnect the command BEFORE the semicolon
-         * from the semicolon itself.
-         *
-         * Before:
-         *
-         * reveal -> SEMI -> echo -> hello
-         *
-         * After:
-         *
-         * reveal -> NULL
-         *
-         * echo -> hello
+         * If background processes finished while
+         * this foreground command was running,
+         * report them NOW.
          */
-                if (prev != NULL)
-                    prev->next = NULL;
+                print_pending_background_jobs();
             }
 
     /*
-     * Execute ONLY the current shell_cmd.
+     * Restore linked list.
      */
-            int result = execute_one_command(command_start);
+            if (separator != NULL && prev != NULL)
+            prev->next = separator;
 
     /*
-     * Restore the original linked list.
-     */
-            if (semi != NULL)
-            {
-                if (prev != NULL)
-                prev->next = semi;
-            }
-
-    /*
-     * If the command failed, stop the sequence.
+     * If execution failed, stop.
      */
             if (result != 0)
             break;
 
     /*
-     * There was no semicolon.
-     * This was the last command.
+     * No separator means this was the last command.
      */
-            if (semi == NULL)
+            if (separator == NULL)
             break;
 
     /*
-     * Continue with the command after ';'
+     * Move to the command after ';' or '&'.
      */
             current = next_command;
         }
