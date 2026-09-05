@@ -99,4 +99,5 @@ int wait_for_foreground_job(pid_t pgid,
                             int *job_status);
 int has_stopped_jobs(void);
 int execute_one_background_command(Token *tokens);
+int resume_job(int job_number, int foreground, int timeout_seconds);
 #endif

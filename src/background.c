@@ -19,6 +19,8 @@ int next_job_number = 1;
 static volatile sig_atomic_t foreground_running = 0;
 pid_t shell_pgid;
 int shell_terminal;
+static volatile sig_atomic_t resume_timed_out = 0;
+static volatile sig_atomic_t resume_pgid = -1;
 
 
 /*
@@ -37,6 +39,21 @@ static int contains_pipe(Token *tokens)
     return 0;
 }
 
+static void sigalrm_handler(int signal_number)
+{
+    (void)signal_number;
+
+    if (resume_pgid > 0)
+    {
+        kill(-resume_pgid, SIGTERM);
+    }
+
+    resume_timed_out = 1;
+
+    const char message[] = "resume: job timed out\n";
+    write(STDOUT_FILENO, message, sizeof(message) - 1);
+}
+
 
 /*
  * Store only the command name.
@@ -49,18 +66,34 @@ static int contains_pipe(Token *tokens)
  *
  * echo
  */
-static void get_command_name(Token *tokens,char *buffer,int buffer_size)
+static void get_full_command(Token *tokens,
+                             char *buffer,
+                             int buffer_size)
 {
     buffer[0] = '\0';
-    if (tokens == NULL)
-        return;
+
+    int first = 1;
+
     while (tokens != NULL)
     {
         if (tokens->type == TOKEN_WORD)
         {
-            snprintf(buffer,buffer_size,"%s",tokens->value);
-            return;
+            if (!first)
+                strncat(buffer, " ",
+                        buffer_size - strlen(buffer) - 1);
+
+            strncat(buffer,
+                    tokens->value,
+                    buffer_size - strlen(buffer) - 1);
+
+            first = 0;
         }
+        else if (tokens->type == TOKEN_PIPE)
+        {
+            strncat(buffer, " | ",
+                    buffer_size - strlen(buffer) - 1);
+        }
+
         tokens = tokens->next;
     }
 }
@@ -221,17 +254,28 @@ static void sigchld_handler(int signal_number)
 void init_background(void)
 {
     struct sigaction sa;
+
+    /* SIGCHLD */
     memset(&sa, 0, sizeof(sa));
+
     sa.sa_handler = sigchld_handler;
     sigemptyset(&sa.sa_mask);
-    /*
-     * Do NOT use SA_RESTART.
-     *
-     * This allows getline() to return when SIGCHLD arrives.
-     */
     sa.sa_flags = 0;
 
     if (sigaction(SIGCHLD, &sa, NULL) == -1)
+    {
+        perror("cshell: sigaction");
+        exit(EXIT_FAILURE);
+    }
+
+    /* SIGALRM */
+    memset(&sa, 0, sizeof(sa));
+
+    sa.sa_handler = sigalrm_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+
+    if (sigaction(SIGALRM, &sa, NULL) == -1)
     {
         perror("cshell: sigaction");
         exit(EXIT_FAILURE);
@@ -304,7 +348,7 @@ static int launch_normal_background(Token *tokens)
         return -1;
     }
     char command_name[4096];
-    get_command_name(tokens,command_name,sizeof(command_name));
+    get_full_command(tokens,command_name,sizeof(command_name));
     pid_t pid = fork();
     if (pid == -1)
     {
@@ -387,7 +431,9 @@ static int launch_pipeline_background(Token *tokens)
      * Get command name of first pipeline command.
      */
     char command_name[4096];
-    get_command_name(tokens,command_name,sizeof(command_name));
+    get_full_command(tokens,
+                 command_name,
+                 sizeof(command_name));
     /*
      * Create ONE job for the entire pipeline.
      */
@@ -555,7 +601,18 @@ int wait_for_foreground_job(pid_t pgid,int process_count,int *job_status)
         if (pid == -1)
         {
             if (errno == EINTR)
+            {
+                /*
+                 * SIGALRM or another signal interrupted waitpid.
+                 *
+                 * If timeout happened, continue waiting so that
+                 * the SIGTERM'ed children are reaped.
+                 */
+                if (resume_timed_out)
+                    continue;
+
                 continue;
+            }
             if (errno == ECHILD)
                 break;
             perror("cshell: waitpid");
@@ -620,4 +677,197 @@ void send_sighup_to_jobs(void)
         }
     }
     sigprocmask(SIG_SETMASK,&old_set,NULL);
+}
+
+static int find_job_by_number(int job_number)
+{
+    for (int i = 0; i < job_count; i++)
+    {
+        if (jobs[i].job_number == job_number)
+            return i;
+    }
+
+    return -1;
+}
+int resume_job(int job_number, int foreground, int timeout_seconds)
+{
+    sigset_t block_set;
+    sigset_t old_set;
+
+    sigemptyset(&block_set);
+    sigaddset(&block_set, SIGCHLD);
+
+    sigprocmask(SIG_BLOCK, &block_set, &old_set);
+
+    int job_index = find_job_by_number(job_number);
+
+    if (job_index == -1)
+    {
+        sigprocmask(SIG_SETMASK, &old_set, NULL);
+
+        printf("resume: no such job\n");
+        fflush(stdout);
+
+        return -1;
+    }
+
+    BackgroundJob *job = &jobs[job_index];
+
+    if (job->completed)
+    {
+        sigprocmask(SIG_SETMASK, &old_set, NULL);
+
+        printf("resume: no such job\n");
+        fflush(stdout);
+
+        return -1;
+    }
+
+    /*
+     * Continue the entire process group.
+     *
+     * SIGCONT is harmless if the processes are
+     * already running.
+     */
+    if (kill(-job->pgid, SIGCONT) == -1)
+    {
+        sigprocmask(SIG_SETMASK, &old_set, NULL);
+
+        printf("resume: no such job\n");
+        fflush(stdout);
+
+        return -1;
+    }
+
+    /*
+     * The job is now running.
+     */
+    job->stopped = 0;
+
+    for (int i = 0; i < job->process_count; i++)
+    {
+        job->processes[i].stopped = 0;
+    }
+
+    /*
+     * Background resume.
+     */
+    if (!foreground)
+    {
+        printf("[%d] + Running    %s\n",
+               job->job_number,
+               job->command);
+
+        fflush(stdout);
+
+        /*
+         * Unblock SIGCHLD only after printing.
+         */
+        sigprocmask(SIG_SETMASK, &old_set, NULL);
+
+        return 0;
+    }
+
+    /*
+     * Foreground resume.
+     */
+    set_foreground_running(1);
+
+    resume_pgid = job->pgid;
+    resume_timed_out = 0;
+
+    /*
+     * Give terminal to the job.
+     */
+    if (tcsetpgrp(shell_terminal, job->pgid) == -1)
+    {
+        perror("cshell: tcsetpgrp");
+
+        resume_pgid = -1;
+        set_foreground_running(0);
+
+        sigprocmask(SIG_SETMASK, &old_set, NULL);
+
+        return -1;
+    }
+
+    /*
+     * Print the command being brought to foreground.
+     */
+    printf("%s\n", job->command);
+    fflush(stdout);
+
+    /*
+     * Start timeout if requested.
+     */
+    if (timeout_seconds > 0)
+        alarm(timeout_seconds);
+
+    /*
+     * Allow SIGCHLD again.
+     */
+    sigprocmask(SIG_SETMASK, &old_set, NULL);
+
+    int status = 0;
+
+    int stopped =
+        wait_for_foreground_job(
+            job->pgid,
+            job->process_count,
+            &status
+        );
+
+    /*
+     * Stop the alarm if the job finished/stopped normally.
+     */
+    if (!resume_timed_out)
+        alarm(0);
+
+    /*
+     * Take terminal back.
+     */
+    if (tcsetpgrp(shell_terminal, shell_pgid) == -1)
+        perror("cshell: tcsetpgrp");
+
+    resume_pgid = -1;
+    set_foreground_running(0);
+
+    /*
+     * Job stopped again with Ctrl-Z.
+     */
+    if (stopped)
+    {
+        job->stopped = 1;
+        job->status = status;
+
+        for (int i = 0; i < job->process_count; i++)
+        {
+            job->processes[i].stopped = 1;
+        }
+
+        printf("[%d] + Stopped    %s\n",
+               job->job_number,
+               job->command);
+
+        fflush(stdout);
+    }
+    else
+    {
+        /*
+         * Job finished.
+         *
+         * Mark every process completed so that
+         * activities() removes the whole job.
+         */
+        job->completed = 1;
+        job->status = status;
+
+        for (int i = 0; i < job->process_count; i++)
+        {
+            job->processes[i].completed = 1;
+            job->processes[i].stopped = 0;
+        }
+    }
+
+    return 0;
 }

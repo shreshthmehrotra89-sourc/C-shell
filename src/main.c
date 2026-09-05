@@ -37,14 +37,154 @@ int execute_one_command(Token *tokens)
 
     if (tokens->type == TOKEN_WORD &&
     strcmp(tokens->value, "activities") == 0)
-{
-    if (tokens->next != NULL)
-        return -1;
+    {
+        if (tokens->next != NULL)
+            return -1;
 
-    activities();
+        activities();
+        
 
-    return 0;
-}
+        return 0;
+    }
+    /* resume */
+    if (tokens->type == TOKEN_WORD &&
+        strcmp(tokens->value, "resume") == 0)
+    {
+        Token *current = tokens->next;
+
+        /*
+        * resume needs at least:
+        *
+        * resume %N fg/bg
+        */
+        if (current == NULL ||
+            current->type != TOKEN_WORD)
+        {
+            printf("resume: invalid syntax\n");
+            return -1;
+        }
+
+        char *job_text = current->value;
+
+        /*
+        * Must begin with %.
+        */
+        if (job_text[0] != '%')
+        {
+            printf("resume: invalid syntax\n");
+            return -1;
+        }
+
+        /*
+        * Parse the job number.
+        */
+        char *endptr;
+
+        long job_number =
+            strtol(job_text + 1, &endptr, 10);
+
+        if (job_text[1] == '\0' ||
+            *endptr != '\0' ||
+            job_number <= 0)
+        {
+            printf("resume: invalid syntax\n");
+            return -1;
+        }
+
+        current = current->next;
+
+        /*
+        * Need fg or bg.
+        */
+        if (current == NULL ||
+            current->type != TOKEN_WORD)
+        {
+            printf("resume: invalid syntax\n");
+            return -1;
+        }
+
+        int foreground;
+
+        if (strcmp(current->value, "fg") == 0)
+        {
+            foreground = 1;
+        }
+        else if (strcmp(current->value, "bg") == 0)
+        {
+            foreground = 0;
+        }
+        else
+        {
+            printf("resume: invalid syntax\n");
+            return -1;
+        }
+
+        current = current->next;
+
+        int timeout_seconds = 0;
+
+        /*
+        * --timeout is allowed ONLY with fg.
+        */
+        if (current != NULL)
+        {
+            if (!foreground)
+            {
+                printf("resume: invalid syntax\n");
+                return -1;
+            }
+
+            if (strcmp(current->value, "--timeout") != 0)
+            {
+                printf("resume: invalid syntax\n");
+                return -1;
+            }
+
+            current = current->next;
+
+            /*
+            * Need timeout number.
+            */
+            if (current == NULL ||
+                current->type != TOKEN_WORD)
+            {
+                printf("resume: invalid syntax\n");
+                return -1;
+            }
+
+            endptr = NULL;
+
+            long timeout =
+                strtol(current->value, &endptr, 10);
+
+            if (current->value[0] == '\0' ||
+                *endptr != '\0' ||
+                timeout <= 0)
+            {
+                printf("resume: invalid syntax\n");
+                return -1;
+            }
+
+            timeout_seconds = (int)timeout;
+
+            current = current->next;
+        }
+
+        /*
+        * There must be nothing after the command.
+        */
+        if (current != NULL)
+        {
+            printf("resume: invalid syntax\n");
+            return -1;
+        }
+
+        return resume_job(
+            (int)job_number,
+            foreground,
+            timeout_seconds
+        );
+    }
     
     //hop
     if (tokens->type == TOKEN_WORD && strcmp(tokens->value, "hop") == 0)
@@ -454,17 +594,13 @@ int main(void)
 
         if (getline(&line, &size, stdin) == -1)
         {
-            if (errno == EINTR)
-            {
-                clearerr(stdin);
-
-                printf("\n");
-
-                print_pending_background_jobs();
-
-                continue;
-            }
-
+            /*
+            * Check EOF FIRST.
+            *
+            * errno may still contain EINTR from an earlier
+            * interrupted getline(), so errno must not be checked
+            * before feof().
+            */
             if (feof(stdin))
             {
                 clearerr(stdin);
@@ -477,17 +613,8 @@ int main(void)
                     printf("cshell: there are stopped jobs\n");
                     fflush(stdout);
 
-                    /*
-                    * Clear EOF so the next Ctrl-D can
-                    * be detected separately.
-                    */
-                    clearerr(stdin);
-
-                    /*
-                    * We need the next Ctrl-D to exit.
-                    */
                     if (stopped_job_warning)
-                    break;
+                        break;
 
                     stopped_job_warning = 1;
 
@@ -495,12 +622,28 @@ int main(void)
                 }
 
                 /*
-                * No stopped jobs.
-                * Exit immediately.
+                * No stopped jobs -> exit.
                 */
                 break;
             }
 
+            /*
+            * getline() was interrupted by a signal.
+            */
+            if (errno == EINTR)
+            {
+                clearerr(stdin);
+
+                printf("\n");
+
+                print_pending_background_jobs();
+
+                continue;
+            }
+
+            /*
+            * Other getline error.
+            */
             clearerr(stdin);
             continue;
         }

@@ -157,11 +157,24 @@ int execute_command(char **argv,char **input_files,int input_count,char **output
 
     if (WIFSTOPPED(status))
 {
+    char command_line[4096];
+command_line[0] = '\0';
+
+for (int i = 0; argv[i] != NULL; i++)
+{
+    if (i > 0)
+        strncat(command_line, " ",
+                sizeof(command_line) - strlen(command_line) - 1);
+
+    strncat(command_line,
+            argv[i],
+            sizeof(command_line) - strlen(command_line) - 1);
+}
     int job_index =
         create_background_job(
             pid,
             pid,
-            argv[0]
+            command_line
         );
 
     if (job_index != -1)
@@ -169,7 +182,7 @@ int execute_command(char **argv,char **input_files,int input_count,char **output
         add_background_process(
             job_index,
             pid,
-            argv[0]
+            command_line
         );
         jobs[job_index].processes[0].stopped = 1;
         jobs[job_index].stopped = 1;
