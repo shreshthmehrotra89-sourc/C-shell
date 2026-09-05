@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include "background.h"
 
 #define MAX_OUTPUT_FILES 100
 #define MAX_PATH_LENGTH 4096
@@ -512,7 +513,7 @@ static int execute_pipeline_internal(Token *tokens,
      * Parse every pipeline command BEFORE forking.
      */
     Token *current = tokens;
-
+    pid_t pgid = 0;
     for (int i = 0; i < command_count; i++)
     {
         Token *next_start = NULL;
@@ -660,6 +661,21 @@ static int execute_pipeline_internal(Token *tokens,
 
         if (pid == 0)
         {
+            if (i == 0)
+    {
+        setpgid(0, 0);
+    }
+    else
+    {
+        setpgid(0, pgid);
+    }
+
+    /*
+     * Children must receive Ctrl-C / Ctrl-Z.
+     */
+    signal(SIGINT, SIG_DFL);
+    signal(SIGTSTP, SIG_DFL);
+    signal(SIGTTOU, SIG_DFL);
             /*
              * Actual pipeline child.
              */
@@ -675,9 +691,14 @@ static int execute_pipeline_internal(Token *tokens,
         }
 
         /*
-         * Parent stores PID.
-         */
-        pids[i] = pid;
+ * Parent stores PID and creates the process group.
+ */
+if (i == 0)
+    pgid = pid;
+
+setpgid(pid, pgid);
+
+pids[i] = pid;
     }
 
     /*
@@ -723,26 +744,71 @@ static int execute_pipeline_internal(Token *tokens,
      * Therefore the shell itself never waits for a
      * background pipeline.
      */
-    int failed = 0;
 
-    for (int i = 0; i < command_count; i++)
+     /*
+ * Give terminal to the foreground pipeline.
+ */
+    if (pid_write_fd == -1)
     {
-        int status;
-
-        if (waitpid(pids[i],
-                    &status,
-                    0) == -1)
+        if (tcsetpgrp(STDIN_FILENO, pgid) == -1)
         {
-            failed = 1;
-            continue;
-        }
-
-        if (!WIFEXITED(status) ||
-            WEXITSTATUS(status) != 0)
-        {
-            failed = 1;
+            perror("cshell: tcsetpgrp");
         }
     }
+    int job_status = 0;
+
+int stopped =
+    wait_for_foreground_job(
+        pgid,
+        command_count,
+        &job_status
+    );
+
+    /*
+ * Shell gets terminal back.
+ */
+if (tcsetpgrp(STDIN_FILENO, shell_pgid) == -1)
+{
+    perror("cshell: tcsetpgrp");
+}
+     if (stopped)
+{
+    char command_name[4096];
+
+    snprintf(command_name,
+             sizeof(command_name),
+             "%s",
+             commands[0].argv[0]);
+
+    int job_index =
+        create_background_job(
+            pgid,
+            pids[0],
+            command_name
+        );
+
+    if (job_index != -1)
+    {
+        for (int i = 0; i < command_count; i++)
+        {
+            add_background_process(
+                job_index,
+                pids[i],
+                commands[i].argv[0]
+            );
+
+            jobs[job_index].processes[i].stopped = 1;
+        }
+
+        jobs[job_index].stopped = 1;
+
+        printf("[%d] + Stopped %s\n",
+               jobs[job_index].job_number,
+               command_name);
+
+        fflush(stdout);
+    }
+}
 
     /*
      * Now the entire pipeline has finished.
@@ -750,15 +816,18 @@ static int execute_pipeline_internal(Token *tokens,
      * Therefore it is safe to copy temporary output
      * into the actual output files.
      */
-    for (int i = 0; i < command_count; i++)
+    if(!stopped)
     {
-        if (commands[i].output_count > 0)
+        for (int i = 0; i < command_count; i++)
         {
-            copy_output(&commands[i]);
+            if (commands[i].output_count > 0)
+            {
+                copy_output(&commands[i]);
 
-            close(commands[i].output_temp_fd);
+                close(commands[i].output_temp_fd);
 
-            commands[i].output_temp_fd = -1;
+                commands[i].output_temp_fd = -1;
+            }
         }
     }
 
@@ -770,9 +839,6 @@ static int execute_pipeline_internal(Token *tokens,
 
     free(commands);
     free(pids);
-
-    if (failed)
-        return -1;
 
     return 0;
 }
@@ -953,6 +1019,13 @@ int launch_pipeline_processes(Token *tokens,
                 setpgid(0, 0);
             else
                 setpgid(0, pgid);
+            
+                 /*
+            * Children must receive Ctrl-C / Ctrl-Z normally.
+            */
+            signal(SIGINT, SIG_DFL);
+            signal(SIGTSTP, SIG_DFL);
+            signal(SIGTTOU, SIG_DFL);
 
             execute_pipeline_child(
                 &commands[i],
@@ -1008,3 +1081,4 @@ int launch_pipeline_processes(Token *tokens,
 
     return 0;
 }
+

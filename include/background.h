@@ -6,6 +6,7 @@
 
 #define MAX_BACKGROUND_JOBS 1000
 #define MAX_PROCESSES 100
+extern pid_t shell_pgid;
 
 typedef struct
 {
@@ -58,6 +59,7 @@ typedef struct
     int completed;
     int reported;
     int status;
+    int stopped;
 
 } BackgroundJob;
 
@@ -86,5 +88,15 @@ int create_background_job(pid_t pgid,
                           char *command);
 int find_process(pid_t pid,
                  int *job_index,
-                 int *process_index);                          
+                 int *process_index);  
+                 
+void init_job_control(void);
+void init_shell_signals(void);
+void send_sighup_to_jobs(void);
+
+int wait_for_foreground_job(pid_t pgid,
+                            int process_count,
+                            int *job_status);
+int has_stopped_jobs(void);
+int execute_one_background_command(Token *tokens);
 #endif

@@ -17,6 +17,8 @@ int job_count = 0;
 
 int next_job_number = 1;
 static volatile sig_atomic_t foreground_running = 0;
+pid_t shell_pgid;
+int shell_terminal;
 
 
 /*
@@ -25,7 +27,6 @@ static volatile sig_atomic_t foreground_running = 0;
 static int contains_pipe(Token *tokens)
 {
     Token *current = tokens;
-
     while (current != NULL)
     {
         if (current->type == TOKEN_PIPE)
@@ -33,7 +34,6 @@ static int contains_pipe(Token *tokens)
 
         current = current->next;
     }
-
     return 0;
 }
 
@@ -49,34 +49,21 @@ static int contains_pipe(Token *tokens)
  *
  * echo
  */
-static void get_command_name(Token *tokens,
-                             char *buffer,
-                             int buffer_size)
+static void get_command_name(Token *tokens,char *buffer,int buffer_size)
 {
     buffer[0] = '\0';
-
     if (tokens == NULL)
         return;
-
     while (tokens != NULL)
     {
         if (tokens->type == TOKEN_WORD)
         {
-            snprintf(buffer,
-                     buffer_size,
-                     "%s",
-                     tokens->value);
-
+            snprintf(buffer,buffer_size,"%s",tokens->value);
             return;
         }
-
         tokens = tokens->next;
     }
 }
-
-
-
-
 /*
  * Print a completed background job.
  *
@@ -89,24 +76,12 @@ static void print_completion(int index)
 
     BackgroundJob *job = &jobs[index];
 
-    if (WIFEXITED(job->status) &&
-        WEXITSTATUS(job->status) == 0)
-    {
-        printf("%s with pid %d exited normally\n",
-               job->command,
-               job->reported_pid);
-    }
+    if (WIFEXITED(job->status) &&  WEXITSTATUS(job->status) == 0)
+    printf("%s with pid %d exited normally\n",job->command,job->reported_pid);
     else
-    {
-        printf("%s with pid %d exited abnormally\n",
-               job->command,
-               job->reported_pid);
-    }
-
+    printf("%s with pid %d exited abnormally\n",job->command,job->reported_pid);
     fflush(stdout);
 }
-
-
 /*
  * Convert a positive integer to a string.
  *
@@ -119,31 +94,22 @@ static int integer_to_string(char *buffer, int value)
 
     int i = 0;
     int j = 0;
-
     if (value == 0)
     {
         buffer[0] = '0';
         buffer[1] = '\0';
         return 1;
     }
-
     while (value > 0)
     {
         temp[i++] = '0' + (value % 10);
         value /= 10;
     }
-
     while (i > 0)
-    {
-        buffer[j++] = temp[--i];
-    }
-
+    buffer[j++] = temp[--i];
     buffer[j] = '\0';
-
     return j;
 }
-
-
 /*
  * Write completion message using write().
  *
@@ -152,83 +118,40 @@ static int integer_to_string(char *buffer, int value)
 static void write_completion_from_handler(BackgroundJob *job)
 {
     char buffer[8192];
-
     int pos = 0;
-
-    /*
-     * command
-     */
-    for (int i = 0;
-         job->command[i] != '\0' &&
-         pos < (int)sizeof(buffer) - 1;
-         i++)
-    {
-        buffer[pos++] = job->command[i];
-    }
-
+    for (int i = 0;job->command[i] != '\0' && pos < (int)sizeof(buffer) - 1;i++)
+    buffer[pos++] = job->command[i];
     /*
      * " with pid "
      */
     const char text1[] = " with pid ";
 
-    for (int i = 0;
-         text1[i] != '\0' &&
-         pos < (int)sizeof(buffer) - 1;
-         i++)
-    {
-        buffer[pos++] = text1[i];
-    }
-
+    for (int i = 0;text1[i] != '\0' && pos < (int)sizeof(buffer) - 1;i++)
+    buffer[pos++] = text1[i];
     /*
      * PID
      */
     char pid_string[32];
-
-    int pid_len =
-        integer_to_string(pid_string,
-                          (int)job->reported_pid);
-
-    for (int i = 0;
-         i < pid_len &&
-         pos < (int)sizeof(buffer) - 1;
-         i++)
-    {
-        buffer[pos++] = pid_string[i];
-    }
-
+    int pid_len =integer_to_string(pid_string,(int)job->reported_pid);
+    for (int i = 0;i < pid_len && pos < (int)sizeof(buffer) - 1;i++)
+    buffer[pos++] = pid_string[i];
     /*
      * Completion status.
      */
-    if (WIFEXITED(job->status) &&
-        WEXITSTATUS(job->status) == 0)
+    if (WIFEXITED(job->status) && WEXITSTATUS(job->status) == 0)
     {
         const char text2[] = " exited normally\n";
-
-        for (int i = 0;
-             text2[i] != '\0' &&
-             pos < (int)sizeof(buffer) - 1;
-             i++)
-        {
-            buffer[pos++] = text2[i];
-        }
+        for (int i = 0;text2[i] != '\0' && pos < (int)sizeof(buffer) - 1;i++)
+        buffer[pos++] = text2[i];
     }
     else
     {
         const char text2[] = " exited abnormally\n";
-
-        for (int i = 0;
-             text2[i] != '\0' &&
-             pos < (int)sizeof(buffer) - 1;
-             i++)
-        {
-            buffer[pos++] = text2[i];
-        }
+        for (int i = 0;text2[i] != '\0' && pos < (int)sizeof(buffer) - 1;i++)
+        buffer[pos++] = text2[i];
     }
-
     write(STDOUT_FILENO, buffer, pos);
 }
-
-
 /*
  * SIGCHLD handler.
  *
@@ -243,80 +166,54 @@ static void write_completion_from_handler(BackgroundJob *job)
 static void sigchld_handler(int signal_number)
 {
     (void)signal_number;
-
     int saved_errno = errno;
-
+    if (foreground_running)
+    {
+        errno = saved_errno;
+        return;
+    }
     while (1)
     {
         int status;
-
-        pid_t pid =
-    waitpid(-1,
-            &status,
-            WNOHANG | WUNTRACED | WCONTINUED);
-
+        pid_t pid =waitpid(-1,&status,WNOHANG | WUNTRACED | WCONTINUED);
         if (pid <= 0)
             break;
-
-        
         int job_index;
         int process_index;
-
-        if (!find_process(pid,
-                  &job_index,
-                  &process_index))
-        {
-            continue;
-        }
-
+        if (!find_process(pid,&job_index,&process_index))
+        continue;
         if (WIFSTOPPED(status))
         {
-            jobs[job_index]
-                .processes[process_index]
-                .stopped = 1;
-
+            jobs[job_index].processes[process_index].stopped = 1;
+            jobs[job_index].stopped = 1;
             continue;
         }
         if (WIFCONTINUED(status))
         {
-            jobs[job_index]
-                .processes[process_index]
-            .stopped = 0;
-
+            jobs[job_index].processes[process_index].stopped = 0;
+            jobs[job_index].stopped = 0;
             continue;
         } 
-        if (WIFEXITED(status) ||
-    WIFSIGNALED(status))
-{
-    jobs[job_index]
-        .processes[process_index]
-        .completed = 1;
-
-    jobs[job_index].status = status;
-
-    int all_completed = 1;
-
-    for (int i = 0;
-         i < jobs[job_index].process_count;
-         i++)
-    {
-        if (!jobs[job_index]
-                 .processes[i]
-                 .completed)
+        if (WIFEXITED(status) || WIFSIGNALED(status))
         {
-            all_completed = 0;
-            break;
+            jobs[job_index].processes[process_index].completed = 1;
+            jobs[job_index].status = status;
+            int all_completed = 1;
+
+            for (int i = 0;i < jobs[job_index].process_count;i++)
+            {
+                if (!jobs[job_index].processes[i].completed)
+                {
+                    all_completed = 0;
+                    break;
+                }
+            }
+            if (all_completed)
+                jobs[job_index].completed = 1;
         }
     }
-
-    if (all_completed)
-        jobs[job_index].completed = 1;
-}
-    }
-
     errno = saved_errno;
 }
-
 
 /*
  * Install SIGCHLD handler.
@@ -324,13 +221,9 @@ static void sigchld_handler(int signal_number)
 void init_background(void)
 {
     struct sigaction sa;
-
     memset(&sa, 0, sizeof(sa));
-
     sa.sa_handler = sigchld_handler;
-
     sigemptyset(&sa.sa_mask);
-
     /*
      * Do NOT use SA_RESTART.
      *
@@ -344,8 +237,6 @@ void init_background(void)
         exit(EXIT_FAILURE);
     }
 }
-
-
 /*
  * Set whether a foreground process is running.
  */
@@ -375,41 +266,28 @@ void print_pending_background_jobs(void)
 
     for (int i = 0; i < job_count; i++)
     {
-        if (jobs[i].completed &&
-            !jobs[i].reported)
+        if (jobs[i].completed && !jobs[i].reported)
         {
             print_completion(i);
-
             jobs[i].reported = 1;
         }
     }
-
     /*
      * Restore signal mask.
      */
     sigprocmask(SIG_SETMASK, &old_set, NULL);
 }
-void add_background_process(int job_index,
-                            pid_t pid,
-                            char *command)
+void add_background_process(int job_index,pid_t pid,char *command)
 {
-    if (job_index < 0 ||
-        job_index >= job_count)
+    if (job_index < 0 || job_index >= job_count)
         return;
-
     if (jobs[job_index].process_count >= MAX_PROCESSES)
         return;
-
-    int index =
-        jobs[job_index].process_count;
-
+    int index =jobs[job_index].process_count;
     jobs[job_index].processes[index].pid = pid;
-
-    snprintf(jobs[job_index].processes[index].command,
-             sizeof(jobs[job_index].processes[index].command),
+    snprintf(jobs[job_index].processes[index].command,sizeof(jobs[job_index].processes[index].command),
              "%s",
              command);
-
     jobs[job_index].processes[index].stopped = 0;
     jobs[job_index].processes[index].completed = 0;
     jobs[job_index].process_count++;
@@ -425,15 +303,9 @@ static int launch_normal_background(Token *tokens)
         printf("cshell: too many background jobs\n");
         return -1;
     }
-
     char command_name[4096];
-
-    get_command_name(tokens,
-                     command_name,
-                     sizeof(command_name));
-
+    get_command_name(tokens,command_name,sizeof(command_name));
     pid_t pid = fork();
-
     if (pid == -1)
     {
         perror("cshell: fork");
@@ -447,6 +319,11 @@ static int launch_normal_background(Token *tokens)
          * Background processes must not read from
          * the terminal.
          */
+
+        signal(SIGINT, SIG_DFL);
+        signal(SIGTSTP, SIG_DFL);
+        signal(SIGTTOU, SIG_DFL);
+
         int null_fd =
             open("/dev/null", O_RDONLY);
 
@@ -462,18 +339,11 @@ static int launch_normal_background(Token *tokens)
             close(null_fd);
             _exit(EXIT_FAILURE);
         }
-
         close(null_fd);
-
         /*
          * Execute using your existing command executor.
          */
-        int result =
-            execute_one_command(tokens);
-
-        if (result == 0)
-            _exit(EXIT_SUCCESS);
-
+        execute_one_background_command(tokens);
         _exit(EXIT_FAILURE);
     }
 
@@ -481,28 +351,16 @@ static int launch_normal_background(Token *tokens)
      * Parent records the job.
      */
     if (pid > 0)
-{
-    setpgid(pid, pid);
-
-    int job_index =
-        create_background_job(pid,
-                              pid,
-                              command_name);
-
-    if (job_index == -1)
-        return -1;
-
-    add_background_process(job_index,
-                           pid,
-                           command_name);
-
-    printf("[%d] %d\n",
-           jobs[job_index].job_number,
-           pid);
-
-    fflush(stdout);
-}
-return 0;
+    {
+        setpgid(pid, pid);
+        int job_index = create_background_job(pid,pid,command_name);
+        if (job_index == -1)
+            return -1;
+        add_background_process(job_index,pid,command_name);
+        printf("[%d] %d\n",jobs[job_index].job_number,pid);
+        fflush(stdout);
+    }
+    return 0;
 }
 static int launch_pipeline_background(Token *tokens)
 {
@@ -511,23 +369,15 @@ static int launch_pipeline_background(Token *tokens)
         printf("cshell: too many background jobs\n");
         return -1;
     }
-
     pid_t pids[MAX_PROCESSES];
     int process_count = 0;
-
     /*
      * Launch every command in the pipeline.
      */
-    if (launch_pipeline_processes(tokens,
-                                  pids,
-                                  &process_count) == -1)
-    {
-        return -1;
-    }
-
+    if (launch_pipeline_processes(tokens,pids,&process_count) == -1)
+    return -1;
     if (process_count <= 0)
         return -1;
-
     /*
      * First process is the process-group leader.
      */
@@ -537,80 +387,48 @@ static int launch_pipeline_background(Token *tokens)
      * Get command name of first pipeline command.
      */
     char command_name[4096];
-
-    get_command_name(tokens,
-                     command_name,
-                     sizeof(command_name));
-
+    get_command_name(tokens,command_name,sizeof(command_name));
     /*
      * Create ONE job for the entire pipeline.
      */
-    int job_index =
-        create_background_job(
-            pgid,
-            pids[0],
-            command_name
-        );
-
+    int job_index =create_background_job(pgid,pids[0],command_name);
     if (job_index == -1)
     {
         for (int i = 0; i < process_count; i++)
             kill(pids[i], SIGTERM);
-
         return -1;
     }
-
     /*
      * Add EVERY process in the pipeline
      * to the same job.
      */
     Token *current = tokens;
-int process_index = 0;
+    int process_index = 0;
 
-while (current != NULL &&
-       process_index < process_count)
-{
-    if (current->type == TOKEN_WORD)
+    while (current != NULL && process_index < process_count)
     {
-        add_background_process(
-            job_index,
-            pids[process_index],
-            current->value
-        );
-
-        process_index++;
-
-        /*
-         * Move to the next pipeline command.
-         */
-        while (current != NULL &&
-               current->type != TOKEN_PIPE)
+        if (current->type == TOKEN_WORD)
         {
+            add_background_process(job_index,pids[process_index],current->value);
+            process_index++;
+            /*
+            * Move to the next pipeline command.
+            */
+            while (current != NULL && current->type != TOKEN_PIPE)
             current = current->next;
+            if (current != NULL)
+                current = current->next;
         }
-
-        if (current != NULL)
-            current = current->next;
-    }
-    else
-    {
+        else
         current = current->next;
     }
-}
-
     /*
      * Report the PID of the first command.
      */
-    printf("[%d] %d\n",
-           jobs[job_index].job_number,
-           pids[0]);
-
+    printf("[%d] %d\n",jobs[job_index].job_number,pids[0]);
     fflush(stdout);
-
     return 0;
 }
-
-
 /*
  * Public function used by main.c.
  */
@@ -618,7 +436,6 @@ int launch_background_command(Token *tokens)
 {
     if (tokens == NULL)
         return -1;
-
     /*
      * IMPORTANT:
      *
@@ -635,62 +452,35 @@ int launch_background_command(Token *tokens)
 
     sigemptyset(&block_set);
     sigaddset(&block_set, SIGCHLD);
-
-    sigprocmask(SIG_BLOCK,
-                &block_set,
-                &old_set);
-
+    sigprocmask(SIG_BLOCK,&block_set,&old_set);
     int result;
-
     if (contains_pipe(tokens))
-    {
-        result =
-            launch_pipeline_background(tokens);
-    }
+    result =launch_pipeline_background(tokens);
     else
-    {
-        result =
-            launch_normal_background(tokens);
-    }
-
+    result =launch_normal_background(tokens);
     /*
      * Now it is safe to allow SIGCHLD again.
      */
-    sigprocmask(SIG_SETMASK,
-                &old_set,
-                NULL);
-
+    sigprocmask(SIG_SETMASK,&old_set,NULL);
     return result;
 }
 
-int create_background_job(pid_t pgid,
-                          pid_t reported_pid,
-                          char *command)
+int create_background_job(pid_t pgid,pid_t reported_pid,char *command)
 {
     if (job_count >= MAX_BACKGROUND_JOBS)
     {
         printf("cshell: too many background jobs\n");
         return -1;
     }
-
     int index = job_count;
+    jobs[index].job_number =next_job_number++;
+    jobs[index].pgid =pgid;
+    jobs[index].reported_pid =reported_pid;
 
-    jobs[index].job_number =
-        next_job_number++;
-
-    jobs[index].pgid =
-        pgid;
-
-    jobs[index].reported_pid =
-        reported_pid;
-
-    snprintf(jobs[index].command,
-             sizeof(jobs[index].command),
-             "%s",
-             command);
+    snprintf(jobs[index].command,sizeof(jobs[index].command),"%s",command);
 
     jobs[index].process_count = 0;
-
+    jobs[index].stopped = 0;
     jobs[index].completed = 0;
     jobs[index].reported = 0;
     jobs[index].status = 0;
@@ -699,15 +489,11 @@ int create_background_job(pid_t pgid,
 
     return index;
 }
-int find_process(pid_t pid,
-                 int *job_index,
-                 int *process_index)
+int find_process(pid_t pid,int *job_index,int *process_index)
 {
     for (int i = 0; i < job_count; i++)
     {
-        for (int j = 0;
-             j < jobs[i].process_count;
-             j++)
+        for (int j = 0;j < jobs[i].process_count;j++)
         {
             if (jobs[i].processes[j].pid == pid)
             {
@@ -718,6 +504,120 @@ int find_process(pid_t pid,
             }
         }
     }
-
     return 0;
+}
+
+void init_job_control(void)
+{
+    shell_terminal = STDIN_FILENO;
+
+    /*
+     * Put the shell in its own process group.
+     */
+    shell_pgid = getpid();
+
+    if (setpgid(shell_pgid, shell_pgid) == -1)
+    {
+        /*
+         * It may already be in its own process group.
+         */
+        if (errno != EACCES)
+        {
+            perror("cshell: setpgid");
+            exit(EXIT_FAILURE);
+        }
+    }
+    /*
+     * Make the shell's process group own the terminal.
+     */
+    if (tcsetpgrp(shell_terminal, shell_pgid) == -1)
+    {
+        perror("cshell: tcsetpgrp");
+        exit(EXIT_FAILURE);
+    }
+}
+
+void init_shell_signals(void)
+{
+    signal(SIGINT, SIG_IGN);
+    signal(SIGTSTP, SIG_IGN);
+    signal(SIGTTOU, SIG_IGN);
+}
+
+int wait_for_foreground_job(pid_t pgid,int process_count,int *job_status)
+{
+    int stopped_count = 0;
+    int completed_count = 0;
+    while (1)
+    {
+        int status;
+        pid_t pid = waitpid(-pgid,&status,WUNTRACED);
+        if (pid == -1)
+        {
+            if (errno == EINTR)
+                continue;
+            if (errno == ECHILD)
+                break;
+            perror("cshell: waitpid");
+            break;
+        }
+        if (WIFSTOPPED(status))
+        {
+            stopped_count++;
+            *job_status = status;
+
+            /*
+             * Ctrl-Z stops the entire process group.
+             * Once one process reports stopped, the
+             * foreground job is considered stopped.
+             */
+            return 1;
+        }
+
+        if (WIFEXITED(status) || WIFSIGNALED(status))
+        {
+            completed_count++;
+           *job_status = status;
+            if (completed_count == process_count)
+                return 0;
+        }
+    }
+    return stopped_count > 0;
+}
+int has_stopped_jobs(void)
+{
+    sigset_t block_set;
+    sigset_t old_set;
+
+    sigemptyset(&block_set);
+    sigaddset(&block_set, SIGCHLD);
+    sigprocmask(SIG_BLOCK,&block_set,&old_set);
+    int found = 0;
+    for (int i = 0; i < job_count; i++)
+    {
+        if (!jobs[i].completed &&
+            jobs[i].stopped)
+        {
+            found = 1;
+            break;
+        }
+    }
+    sigprocmask(SIG_SETMASK,&old_set,NULL);
+    return found;
+}
+void send_sighup_to_jobs(void)
+{
+    sigset_t block_set;
+    sigset_t old_set;
+    sigemptyset(&block_set);
+    sigaddset(&block_set, SIGCHLD);
+    sigprocmask(SIG_BLOCK,&block_set,&old_set);
+    for (int i = 0; i < job_count; i++)
+    {
+        if (!jobs[i].completed)
+        {
+            kill(-jobs[i].pgid, SIGHUP);
+        }
+    }
+    sigprocmask(SIG_SETMASK,&old_set,NULL);
 }
