@@ -255,27 +255,24 @@ int main(void)
     while (1)
     {
         print_prompt();
-        if (getline(&line, &size, stdin) == -1)
-        {
-            if (errno == EINTR)
-            {
-                clearerr(stdin);
 
-        /*
-         * SIGCHLD interrupted getline().
-         * Background processes may have completed.
-         * Print their completion messages before
-         * showing the next prompt.
-         */
-                print_pending_background_jobs();
+if (getline(&line, &size, stdin) == -1)
+{
+    if (errno == EINTR)
+    {
+        clearerr(stdin);
 
-                continue;
-            }
+        printf("\n");
 
-            clearerr(stdin);
-            printf("\n");
-            continue;
-        }  
+        print_pending_background_jobs();
+
+        continue;
+    }
+
+    clearerr(stdin);
+    printf("\n");
+    continue;
+}
         Token *tokens = NULL;
         if (lex_line(line, &tokens) != 0)
         {

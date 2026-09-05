@@ -293,6 +293,24 @@ static void sigchld_handler(int signal_number)
         .completed = 1;
 
     jobs[job_index].status = status;
+
+    int all_completed = 1;
+
+    for (int i = 0;
+         i < jobs[job_index].process_count;
+         i++)
+    {
+        if (!jobs[job_index]
+                 .processes[i]
+                 .completed)
+        {
+            all_completed = 0;
+            break;
+        }
+    }
+
+    if (all_completed)
+        jobs[job_index].completed = 1;
 }
     }
 
@@ -546,14 +564,39 @@ static int launch_pipeline_background(Token *tokens)
      * Add EVERY process in the pipeline
      * to the same job.
      */
-    for (int i = 0; i < process_count; i++)
+    Token *current = tokens;
+int process_index = 0;
+
+while (current != NULL &&
+       process_index < process_count)
+{
+    if (current->type == TOKEN_WORD)
     {
         add_background_process(
             job_index,
-            pids[i],
-            command_name
+            pids[process_index],
+            current->value
         );
+
+        process_index++;
+
+        /*
+         * Move to the next pipeline command.
+         */
+        while (current != NULL &&
+               current->type != TOKEN_PIPE)
+        {
+            current = current->next;
+        }
+
+        if (current != NULL)
+            current = current->next;
     }
+    else
+    {
+        current = current->next;
+    }
+}
 
     /*
      * Report the PID of the first command.
