@@ -20,6 +20,7 @@ int execute_command(char **argv,char **input_files,int input_count,char **output
 
     char *command = argv[0];
     char local_path[4096];
+    
 
     if (command[0] == '%')
     {

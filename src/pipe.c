@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <signal.h>
 
 #define MAX_OUTPUT_FILES 100
 #define MAX_PATH_LENGTH 4096
@@ -442,169 +443,568 @@ void execute_pipeline_child(PipelineCommand *command,int command_index,int comma
 }
 
 //start execution of pipeline
-int execute_pipeline(Token *tokens)
+/*
+ * Common pipeline execution function.
+ *
+ * pid_write_fd:
+ *
+ *     -1  -> normal foreground execution
+ *
+ *     >=0 -> background execution
+ *
+ * In background mode, the PID of the FIRST pipeline
+ * command is written to pid_write_fd.
+ */
+static int execute_pipeline_internal(Token *tokens,
+                                      int pid_write_fd)
 {
     if (tokens == NULL)
         return -1;
-    int command_count=count_commands(tokens);
-    int pipe_count=command_count - 1;
+
+    int command_count =
+        count_commands(tokens);
+
+    int pipe_count =
+        command_count - 1;
+
     int pipe_fds[pipe_count][2];
 
-    for (int i = 0;i < pipe_count;i++)
+    /*
+     * Create all pipes first.
+     */
+    for (int i = 0; i < pipe_count; i++)
     {
         if (pipe(pipe_fds[i]) == -1)
         {
             perror("cshell");
-            //Close previously created pipes.
+
             for (int j = 0; j < i; j++)
             {
                 close(pipe_fds[j][0]);
                 close(pipe_fds[j][1]);
             }
+
             return -1;
         }
     }
-    //Allocate information for every command.
-    PipelineCommand *commands =calloc(command_count,sizeof(PipelineCommand));
+
+    /*
+     * Allocate information for every command.
+     */
+    PipelineCommand *commands =
+        calloc(command_count,
+               sizeof(PipelineCommand));
+
     if (commands == NULL)
     {
         printf("cshell: memory allocation failed\n");
-        for (int i = 0;i < pipe_count;i++)
+
+        for (int i = 0; i < pipe_count; i++)
         {
             close(pipe_fds[i][0]);
             close(pipe_fds[i][1]);
         }
+
         return -1;
     }
-    //Parse every command BEFORE forking.
+
+    /*
+     * Parse every pipeline command BEFORE forking.
+     */
     Token *current = tokens;
-    for (int i = 0;i < command_count;i++)
+
+    for (int i = 0; i < command_count; i++)
     {
         Token *next_start = NULL;
-        if (parse_command(current,&commands[i],&next_start) == -1)
+
+        if (parse_command(current,
+                          &commands[i],
+                          &next_start) == -1)
         {
             printf("cshell: memory allocation failed\n");
+
             for (int j = 0; j <= i; j++)
-            free_command(&commands[j]);
+                free_command(&commands[j]);
+
             free(commands);
-            for (int j = 0;j < pipe_count;j++)
+
+            for (int j = 0; j < pipe_count; j++)
             {
                 close(pipe_fds[j][0]);
                 close(pipe_fds[j][1]);
             }
+
             return -1;
         }
+
         current = next_start;
     }
-     /* Create temporary output files BEFORE fork.
-    This is important because the parent must retain the
-    descriptor so that it can copy the child's output later.
-   */
-    for (int i = 0;i < command_count;i++)
+
+    /*
+     * Create temporary output files BEFORE fork.
+     *
+     * This is needed because copy_output() happens
+     * after the pipeline finishes.
+     */
+    for (int i = 0; i < command_count; i++)
     {
         if (commands[i].output_count > 0)
         {
             if (create_output_temp(&commands[i]) == -1)
             {
-                for (int j = 0;j < command_count;j++)
+                for (int j = 0; j < command_count; j++)
                 {
                     if (commands[j].output_temp_fd != -1)
-                    close(commands[j].output_temp_fd);
+                        close(commands[j].output_temp_fd);
+
                     free_command(&commands[j]);
                 }
+
                 free(commands);
-                for (int j = 0;j < pipe_count;j++)
+
+                for (int j = 0; j < pipe_count; j++)
                 {
                     close(pipe_fds[j][0]);
                     close(pipe_fds[j][1]);
                 }
+
                 return -1;
             }
         }
     }
-    pid_t *pids =malloc(sizeof(pid_t) * command_count);
+
+    /*
+     * Store PID of every pipeline process.
+     */
+    pid_t *pids =
+        malloc(sizeof(pid_t) * command_count);
+
     if (pids == NULL)
     {
         printf("cshell: memory allocation failed\n");
-        for (int i = 0;i < command_count;i++)
+
+        for (int i = 0; i < command_count; i++)
         {
             if (commands[i].output_temp_fd != -1)
-            close(commands[i].output_temp_fd);
+                close(commands[i].output_temp_fd);
+
             free_command(&commands[i]);
         }
+
         free(commands);
-        for (int i = 0;i < pipe_count;i++)
+
+        for (int i = 0; i < pipe_count; i++)
         {
             close(pipe_fds[i][0]);
             close(pipe_fds[i][1]);
         }
+
         return -1;
     }
-    //fork every command
-    for (int i = 0;i < command_count;i++)
+
+    /*
+     * Fork every pipeline command.
+     */
+    for (int i = 0; i < command_count; i++)
     {
         pid_t pid = fork();
+
         if (pid == -1)
         {
             perror("cshell");
-            //parent closes unnecessary pipes
-            for (int j = 0;j < pipe_count;j++)
+
+            /*
+             * Close pipes.
+             */
+            for (int j = 0; j < pipe_count; j++)
+            {
+                close(pipe_fds[j][0]);
+                close(pipe_fds[j][1]);
+            }
+
+            /*
+             * Foreground case:
+             * wait for already-created children.
+             *
+             * Background case:
+             * terminate already-created children.
+             */
+            if (pid_write_fd == -1)
+            {
+                for (int j = 0; j < i; j++)
+                    waitpid(pids[j], NULL, 0);
+            }
+            else
+            {
+                for (int j = 0; j < i; j++)
+                    kill(pids[j], SIGTERM);
+            }
+
+            free(pids);
+
+            for (int j = 0; j < command_count; j++)
+            {
+                if (commands[j].output_temp_fd != -1)
+                    close(commands[j].output_temp_fd);
+
+                free_command(&commands[j]);
+            }
+
+            free(commands);
+
+            if (pid_write_fd != -1)
+                close(pid_write_fd);
+
+            return -1;
+        }
+
+        if (pid == 0)
+        {
+            /*
+             * Actual pipeline child.
+             */
+            execute_pipeline_child(
+                &commands[i],
+                i,
+                command_count,
+                pipe_fds,
+                pipe_count
+            );
+
+            exit(EXIT_FAILURE);
+        }
+
+        /*
+         * Parent stores PID.
+         */
+        pids[i] = pid;
+    }
+
+    /*
+     * IMPORTANT:
+     *
+     * First PID is the PID required by D2.
+     */
+    if (pid_write_fd != -1)
+    {
+        ssize_t written =
+            write(pid_write_fd,
+                  &pids[0],
+                  sizeof(pids[0]));
+
+        if (written != sizeof(pids[0]))
+        {
+            perror("cshell: unable to send pipeline pid");
+        }
+
+        close(pid_write_fd);
+    }
+
+    /*
+     * Parent closes all pipe descriptors.
+     */
+    for (int i = 0; i < pipe_count; i++)
+    {
+        close(pipe_fds[i][0]);
+        close(pipe_fds[i][1]);
+    }
+
+    /*
+     * We ALWAYS wait inside this function.
+     *
+     * Difference:
+     *
+     * Foreground:
+     *     shell itself calls this function
+     *
+     * Background:
+     *     background monitor calls this function
+     *
+     * Therefore the shell itself never waits for a
+     * background pipeline.
+     */
+    int failed = 0;
+
+    for (int i = 0; i < command_count; i++)
+    {
+        int status;
+
+        if (waitpid(pids[i],
+                    &status,
+                    0) == -1)
+        {
+            failed = 1;
+            continue;
+        }
+
+        if (!WIFEXITED(status) ||
+            WEXITSTATUS(status) != 0)
+        {
+            failed = 1;
+        }
+    }
+
+    /*
+     * Now the entire pipeline has finished.
+     *
+     * Therefore it is safe to copy temporary output
+     * into the actual output files.
+     */
+    for (int i = 0; i < command_count; i++)
+    {
+        if (commands[i].output_count > 0)
+        {
+            copy_output(&commands[i]);
+
+            close(commands[i].output_temp_fd);
+
+            commands[i].output_temp_fd = -1;
+        }
+    }
+
+    /*
+     * Free command information.
+     */
+    for (int i = 0; i < command_count; i++)
+        free_command(&commands[i]);
+
+    free(commands);
+    free(pids);
+
+    if (failed)
+        return -1;
+
+    return 0;
+}
+
+
+/*
+ * Normal foreground pipeline.
+ *
+ * Your existing execute_one_command() calls this.
+ */
+int execute_pipeline(Token *tokens)
+{
+    return execute_pipeline_internal(tokens, -1);
+}
+
+
+/*
+ * Background pipeline.
+ *
+ * pid_write_fd is connected to the shell's background
+ * manager.
+ */
+int execute_pipeline_background(Token *tokens,
+                                int pid_write_fd)
+{
+    return execute_pipeline_internal(tokens,
+                                     pid_write_fd);
+}
+
+int launch_pipeline_processes(Token *tokens,
+                              pid_t *pids,
+                              int *process_count)
+{
+    if (tokens == NULL ||
+        pids == NULL ||
+        process_count == NULL)
+        return -1;
+
+    int command_count = count_commands(tokens);
+    int pipe_count = command_count - 1;
+
+    int pipe_fds[pipe_count][2];
+
+    /* Create pipes */
+    for (int i = 0; i < pipe_count; i++)
+    {
+        if (pipe(pipe_fds[i]) == -1)
+        {
+            perror("cshell: pipe");
+
+            for (int j = 0; j < i; j++)
+            {
+                close(pipe_fds[j][0]);
+                close(pipe_fds[j][1]);
+            }
+
+            return -1;
+        }
+    }
+
+    /* Allocate commands */
+    PipelineCommand *commands =
+        calloc(command_count,
+               sizeof(PipelineCommand));
+
+    if (commands == NULL)
+    {
+        perror("cshell: calloc");
+
+        for (int i = 0; i < pipe_count; i++)
+        {
+            close(pipe_fds[i][0]);
+            close(pipe_fds[i][1]);
+        }
+
+        return -1;
+    }
+
+    /* Parse all commands before forking */
+    Token *current = tokens;
+
+    for (int i = 0; i < command_count; i++)
+    {
+        Token *next_start = NULL;
+
+        if (parse_command(current,
+                          &commands[i],
+                          &next_start) == -1)
+        {
+            for (int j = 0; j <= i; j++)
+                free_command(&commands[j]);
+
+            free(commands);
+
+            for (int j = 0; j < pipe_count; j++)
+            {
+                close(pipe_fds[j][0]);
+                close(pipe_fds[j][1]);
+            }
+
+            return -1;
+        }
+
+        current = next_start;
+    }
+
+    /*
+     * Create output temporary files.
+     */
+    for (int i = 0; i < command_count; i++)
+    {
+        if (commands[i].output_count > 0)
+        {
+            if (create_output_temp(&commands[i]) == -1)
+            {
+                for (int j = 0; j < command_count; j++)
+                {
+                    if (commands[j].output_temp_fd != -1)
+                        close(commands[j].output_temp_fd);
+
+                    free_command(&commands[j]);
+                }
+
+                free(commands);
+
+                for (int j = 0; j < pipe_count; j++)
+                {
+                    close(pipe_fds[j][0]);
+                    close(pipe_fds[j][1]);
+                }
+
+                return -1;
+            }
+        }
+    }
+
+    /*
+     * Fork every pipeline command.
+     */
+    pid_t pgid = 0;
+
+    for (int i = 0; i < command_count; i++)
+    {
+        pid_t pid = fork();
+
+        if (pid == -1)
+        {
+            perror("cshell: fork");
+
+            for (int j = 0; j < pipe_count; j++)
             {
                 close(pipe_fds[j][0]);
                 close(pipe_fds[j][1]);
             }
 
             for (int j = 0; j < i; j++)
-                waitpid(pids[j], NULL, 0);
+                kill(pids[j], SIGTERM);
 
-            free(pids);
-
-            for (int j = 0;j < command_count;j++)
+            for (int j = 0; j < command_count; j++)
             {
                 if (commands[j].output_temp_fd != -1)
                     close(commands[j].output_temp_fd);
+
                 free_command(&commands[j]);
             }
+
             free(commands);
+
             return -1;
         }
+
         if (pid == 0)
         {
-            execute_pipeline_child(&commands[i],i,command_count,pipe_fds,pipe_count);
-            exit(EXIT_FAILURE);
+            /*
+             * First child becomes the process-group leader.
+             */
+            if (i == 0)
+                setpgid(0, 0);
+            else
+                setpgid(0, pgid);
+
+            execute_pipeline_child(
+                &commands[i],
+                i,
+                command_count,
+                pipe_fds,
+                pipe_count
+            );
+
+            _exit(EXIT_FAILURE);
         }
+
+        /*
+         * First child's PID becomes the PGID.
+         */
+        if (i == 0)
+            pgid = pid;
+
+        /*
+         * Parent also sets the child's process group.
+         */
+        setpgid(pid, pgid);
+
         pids[i] = pid;
     }
 
-    for (int i = 0;i < pipe_count;i++)
+    /*
+     * Parent closes all pipe descriptors.
+     */
+    for (int i = 0; i < pipe_count; i++)
     {
         close(pipe_fds[i][0]);
         close(pipe_fds[i][1]);
     }
 
-    int failed = 0;
-    for (int i = 0;i < command_count;i++)
+    /*
+     * We don't wait here.
+     *
+     * SIGCHLD will later tell the shell
+     * when each process finishes.
+     */
+    for (int i = 0; i < command_count; i++)
     {
-        int status;
-        waitpid(pids[i], &status, 0);
-        if(!WIFEXITED(status) || WEXITSTATUS(status) != 0)
-        failed = 1;
-    }
- 
-    for (int i = 0;i < command_count;i++)
-    {
-        if (commands[i].output_count > 0)
-        {
-            copy_output(&commands[i]);
+        if (commands[i].output_temp_fd != -1)
             close(commands[i].output_temp_fd);
-            commands[i].output_temp_fd = -1;
-        }
+
+        free_command(&commands[i]);
     }
-    for (int i = 0;i < command_count;i++)
-    free_command(&commands[i]);
+
     free(commands);
-    free(pids);
-    if (failed)
-    return -1;
+
+    *process_count = command_count;
+
     return 0;
 }

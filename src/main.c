@@ -13,6 +13,7 @@
 #include "output_redirect.h"
 #include "pipe.h"
 #include "background.h"
+#include "activities.h"
 #include <errno.h>
 
 int execute_one_command(Token *tokens)
@@ -33,6 +34,17 @@ int execute_one_command(Token *tokens)
     }
     if (has_pipe)
     return execute_pipeline(tokens);
+
+    if (tokens->type == TOKEN_WORD &&
+    strcmp(tokens->value, "activities") == 0)
+{
+    if (tokens->next != NULL)
+        return -1;
+
+    activities();
+
+    return 0;
+}
     
     //hop
     if (tokens->type == TOKEN_WORD && strcmp(tokens->value, "hop") == 0)
