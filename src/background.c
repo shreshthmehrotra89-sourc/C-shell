@@ -21,8 +21,6 @@ pid_t shell_pgid;
 int shell_terminal;
 static volatile sig_atomic_t resume_timed_out = 0;
 static volatile sig_atomic_t resume_pgid = -1;
-
-
 /*
  * Check whether a command contains a pipe.
  */
@@ -33,67 +31,34 @@ static int contains_pipe(Token *tokens)
     {
         if (current->type == TOKEN_PIPE)
             return 1;
-
         current = current->next;
     }
     return 0;
 }
-
 static void sigalrm_handler(int signal_number)
 {
     (void)signal_number;
-
     if (resume_pgid > 0)
-    {
-        kill(-resume_pgid, SIGTERM);
-    }
-
+    kill(-resume_pgid, SIGTERM);
     resume_timed_out = 1;
-
     const char message[] = "resume: job timed out\n";
     write(STDOUT_FILENO, message, sizeof(message) - 1);
 }
-
-
-/*
- * Store only the command name.
- *
- * Example:
- *
- * echo hello > a.txt
- *
- * stores:
- *
- * echo
- */
-static void get_full_command(Token *tokens,
-                             char *buffer,
-                             int buffer_size)
+static void get_full_command(Token *tokens,char *buffer,int buffer_size)
 {
     buffer[0] = '\0';
-
     int first = 1;
-
     while (tokens != NULL)
     {
         if (tokens->type == TOKEN_WORD)
         {
             if (!first)
-                strncat(buffer, " ",
-                        buffer_size - strlen(buffer) - 1);
-
-            strncat(buffer,
-                    tokens->value,
-                    buffer_size - strlen(buffer) - 1);
-
+            strncat(buffer, " ",buffer_size - strlen(buffer) - 1);
+            strncat(buffer,tokens->value,buffer_size - strlen(buffer) - 1);
             first = 0;
         }
         else if (tokens->type == TOKEN_PIPE)
-        {
-            strncat(buffer, " | ",
-                    buffer_size - strlen(buffer) - 1);
-        }
-
+        strncat(buffer, " | ", buffer_size - strlen(buffer) - 1);
         tokens = tokens->next;
     }
 }
@@ -106,7 +71,6 @@ static void print_completion(int index)
 {
     if (index < 0 || index >= job_count)
         return;
-
     BackgroundJob *job = &jobs[index];
 
     if (WIFEXITED(job->status) &&  WEXITSTATUS(job->status) == 0)
@@ -115,134 +79,91 @@ static void print_completion(int index)
     printf("%s with pid %d exited abnormally\n",job->command,job->reported_pid);
     fflush(stdout);
 }
-/*
- * Convert a positive integer to a string.
- *
- * Used inside the signal handler because sprintf/printf
- * are not async-signal-safe.
- */
-static int integer_to_string(char *buffer, int value)
-{
-    char temp[32];
-
-    int i = 0;
-    int j = 0;
-    if (value == 0)
-    {
-        buffer[0] = '0';
-        buffer[1] = '\0';
-        return 1;
-    }
-    while (value > 0)
-    {
-        temp[i++] = '0' + (value % 10);
-        value /= 10;
-    }
-    while (i > 0)
-    buffer[j++] = temp[--i];
-    buffer[j] = '\0';
-    return j;
-}
-/*
- * Write completion message using write().
- *
- * write() is async-signal-safe.
- */
-static void write_completion_from_handler(BackgroundJob *job)
-{
-    char buffer[8192];
-    int pos = 0;
-    for (int i = 0;job->command[i] != '\0' && pos < (int)sizeof(buffer) - 1;i++)
-    buffer[pos++] = job->command[i];
-    /*
-     * " with pid "
-     */
-    const char text1[] = " with pid ";
-
-    for (int i = 0;text1[i] != '\0' && pos < (int)sizeof(buffer) - 1;i++)
-    buffer[pos++] = text1[i];
-    /*
-     * PID
-     */
-    char pid_string[32];
-    int pid_len =integer_to_string(pid_string,(int)job->reported_pid);
-    for (int i = 0;i < pid_len && pos < (int)sizeof(buffer) - 1;i++)
-    buffer[pos++] = pid_string[i];
-    /*
-     * Completion status.
-     */
-    if (WIFEXITED(job->status) && WEXITSTATUS(job->status) == 0)
-    {
-        const char text2[] = " exited normally\n";
-        for (int i = 0;text2[i] != '\0' && pos < (int)sizeof(buffer) - 1;i++)
-        buffer[pos++] = text2[i];
-    }
-    else
-    {
-        const char text2[] = " exited abnormally\n";
-        for (int i = 0;text2[i] != '\0' && pos < (int)sizeof(buffer) - 1;i++)
-        buffer[pos++] = text2[i];
-    }
-    write(STDOUT_FILENO, buffer, pos);
-}
-/*
- * SIGCHLD handler.
- *
- * Requirement #6:
- *     install SIGCHLD handler
- *
- * Requirement #7:
- *     reap using waitpid(..., WNOHANG)
- *
- * We never block here.
- */
 static void sigchld_handler(int signal_number)
 {
     (void)signal_number;
     int saved_errno = errno;
-    if (foreground_running)
-    {
-        errno = saved_errno;
-        return;
-    }
-    while (1)
-    {
-        int status;
-        pid_t pid =waitpid(-1,&status,WNOHANG | WUNTRACED | WCONTINUED);
-        if (pid <= 0)
-            break;
-        int job_index;
-        int process_index;
-        if (!find_process(pid,&job_index,&process_index))
-        continue;
-        if (WIFSTOPPED(status))
-        {
-            jobs[job_index].processes[process_index].stopped = 1;
-            jobs[job_index].stopped = 1;
-            continue;
-        }
-        if (WIFCONTINUED(status))
-        {
-            jobs[job_index].processes[process_index].stopped = 0;
-            jobs[job_index].stopped = 0;
-            continue;
-        } 
-        if (WIFEXITED(status) || WIFSIGNALED(status))
-        {
-            jobs[job_index].processes[process_index].completed = 1;
-            jobs[job_index].status = status;
-            int all_completed = 1;
 
-            for (int i = 0;i < jobs[job_index].process_count;i++)
+    for (int i = 0; i < job_count; i++)
+    {
+        BackgroundJob *job = &jobs[i];
+        if (job->completed)
+        continue;
+
+        if (foreground_running && resume_pgid > 0 && job->pgid == resume_pgid)
+        continue;
+        for (int j = 0; j < job->process_count; j++)
+        {
+            BackgroundProcess *process =&job->processes[j];
+            if (process->completed)
+            continue;
+            int status;
+            pid_t result =waitpid(process->pid,&status,WNOHANG | WUNTRACED | WCONTINUED);
+
+            if (result <= 0)
+                continue;
+            // Process stopped.
+            
+            if (WIFSTOPPED(status))
             {
-                if (!jobs[job_index].processes[i].completed)
+                process->stopped = 1;
+                job->stopped = 1;
+                continue;
+            }
+            // Process continued.
+            if (WIFCONTINUED(status))
+            {
+                process->stopped = 0;
+                /*
+                 * Recalculate the job's stopped state.
+                 */
+                int any_stopped = 0;
+                for (int k = 0;k < job->process_count;k++)
                 {
-                    all_completed = 0;
-                    break;
+                    if (!job->processes[k].completed && job->processes[k].stopped)
+                    {
+                        any_stopped = 1;
+                        break;
+                    }
+                }
+                job->stopped = any_stopped;
+                continue;
+            }
+
+            /*
+             * Process exited normally or was killed
+             * by a signal.
+             */
+            if (WIFEXITED(status) || WIFSIGNALED(status))
+            {
+                process->completed = 1;
+                process->stopped = 0;
+                /*
+                 * Store the status.
+                 *
+                 * For your completion message, this is
+                 * the status of the process that finished.
+                 */
+                job->status = status;
+                /*
+                 * Check whether every process in this
+                 * background job has finished.
+                 */
+                int all_completed = 1;
+                for (int k = 0;k < job->process_count;k++)
+                {
+                    if (!job->processes[k].completed)
+                    {
+                        all_completed = 0;
+                        break;
+                    }
+                }
+                if (all_completed)
+                {
+                    job->completed = 1;
+                    job->stopped = 0;
                 }
             }
-            if (all_completed)
-                jobs[job_index].completed = 1;
         }
     }
     errno = saved_errno;
@@ -257,11 +178,9 @@ void init_background(void)
 
     /* SIGCHLD */
     memset(&sa, 0, sizeof(sa));
-
     sa.sa_handler = sigchld_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
-
     if (sigaction(SIGCHLD, &sa, NULL) == -1)
     {
         perror("cshell: sigaction");
@@ -288,8 +207,6 @@ void set_foreground_running(int running)
 {
     foreground_running = running;
 }
-
-
 /*
  * Print background processes that finished while
  * a foreground process was running.
@@ -336,7 +253,6 @@ void add_background_process(int job_index,pid_t pid,char *command)
     jobs[job_index].processes[index].completed = 0;
     jobs[job_index].process_count++;
 }
-
 /*
  * Launch one normal command in the background.
  */
@@ -367,9 +283,7 @@ static int launch_normal_background(Token *tokens)
         signal(SIGINT, SIG_DFL);
         signal(SIGTSTP, SIG_DFL);
         signal(SIGTTOU, SIG_DFL);
-
-        int null_fd =
-            open("/dev/null", O_RDONLY);
+        int null_fd =open("/dev/null", O_RDONLY);
 
         if (null_fd == -1)
         {
@@ -390,7 +304,6 @@ static int launch_normal_background(Token *tokens)
         execute_one_background_command(tokens);
         _exit(EXIT_FAILURE);
     }
-
     /*
      * Parent records the job.
      */
@@ -421,19 +334,16 @@ static int launch_pipeline_background(Token *tokens)
     if (launch_pipeline_processes(tokens,pids,&process_count) == -1)
     return -1;
     if (process_count <= 0)
-        return -1;
+    return -1;
     /*
      * First process is the process-group leader.
      */
     pid_t pgid = pids[0];
-
     /*
      * Get command name of first pipeline command.
      */
     char command_name[4096];
-    get_full_command(tokens,
-                 command_name,
-                 sizeof(command_name));
+    get_full_command(tokens,command_name,sizeof(command_name));
     /*
      * Create ONE job for the entire pipeline.
      */
@@ -450,7 +360,6 @@ static int launch_pipeline_background(Token *tokens)
      */
     Token *current = tokens;
     int process_index = 0;
-
     while (current != NULL && process_index < process_count)
     {
         if (current->type == TOKEN_WORD)
@@ -463,7 +372,7 @@ static int launch_pipeline_background(Token *tokens)
             while (current != NULL && current->type != TOKEN_PIPE)
             current = current->next;
             if (current != NULL)
-                current = current->next;
+            current = current->next;
         }
         else
         current = current->next;
@@ -532,7 +441,6 @@ int create_background_job(pid_t pgid,pid_t reported_pid,char *command)
     jobs[index].status = 0;
 
     job_count++;
-
     return index;
 }
 int find_process(pid_t pid,int *job_index,int *process_index)
@@ -545,7 +453,6 @@ int find_process(pid_t pid,int *job_index,int *process_index)
             {
                 *job_index = i;
                 *process_index = j;
-
                 return 1;
             }
         }
@@ -556,7 +463,6 @@ int find_process(pid_t pid,int *job_index,int *process_index)
 void init_job_control(void)
 {
     shell_terminal = STDIN_FILENO;
-
     /*
      * Put the shell in its own process group.
      */
@@ -689,28 +595,159 @@ static int find_job_by_number(int job_number)
 
     return -1;
 }
+int ping_job(const char *target, const char *signal_text)
+{
+    if (signal_text == NULL || signal_text[0] == '\0')
+    {
+        printf("ping: invalid syntax\n");
+        return -1;
+    }
+    if (signal_text[0] == '-')
+    {
+        printf("ping: invalid syntax\n");
+        return -1;
+    }
+    char *endptr = NULL;
+    errno = 0;
+    long signal_number = strtol(signal_text, &endptr, 10);
+
+    if (signal_text[0] == '\0' || endptr == signal_text || *endptr != '\0' || errno == ERANGE || signal_number < 0)
+    {
+        printf("ping: invalid syntax\n");
+        return -1;
+    }
+    /*
+     * The actual signal is signal_number % 64.
+     */
+    int actual_signal = (int)(signal_number % 64);
+    if (target == NULL || target[0] == '\0')
+    {
+        printf("ping: no such process found\n");
+        return -1;
+    }
+    if (target[0] == '%')
+    {
+        /*
+         * Must have something after '%'.
+         */
+        if (target[1] == '\0')
+        {
+            printf("ping: no such process found\n");
+            return -1;
+        }
+        char *job_endptr = NULL;
+        errno = 0;
+        long job_number =strtol(target + 1, &job_endptr, 10);
+
+        if (job_endptr == target + 1 || *job_endptr != '\0' ||  errno == ERANGE || job_number <= 0)
+        {
+            printf("ping: no such process found\n");
+            return -1;
+        }
+        int job_index =find_job_by_number((int)job_number);
+        /*
+         * Unknown job.
+         */
+        if (job_index == -1)
+        {
+            printf("ping: no such process found\n");
+            return -1;
+        }
+        BackgroundJob *job = &jobs[job_index];
+        /*
+         * Completed jobs are no longer valid targets.
+         */
+        if (job->completed)
+        {
+            printf("ping: no such process found\n");
+            return -1;
+        }
+        /*
+         * Send signal to the ENTIRE process group.
+         *
+         * Negative PID means process group in kill().
+         */
+        if (kill(-job->pgid, actual_signal) == -1)
+        {
+            /*
+             * If the process group no longer exists,
+             * treat it as unknown.
+             */
+            if (errno == ESRCH)
+            {
+                printf("ping: no such process found\n");
+                return -1;
+            }
+
+            printf("ping: no such process found\n");
+            return -1;
+        }
+        printf("Sent signal %ld to %s\n",signal_number,target);
+        fflush(stdout);
+        return 0;
+    }
+    if (target[0] == '-')
+    {
+        printf("ping: no such process found\n");
+        return -1;
+    }
+    char *pid_endptr = NULL;
+    errno = 0;
+    long pid_value =strtol(target, &pid_endptr, 10);
+
+    if (pid_endptr == target || *pid_endptr != '\0' || errno == ERANGE ||pid_value <= 0)
+    {
+        printf("ping: no such process found\n");
+        return -1;
+    }
+    pid_t pid = (pid_t)pid_value;
+    int job_index = -1;
+    int process_index = -1;
+
+    if (!find_process(pid, &job_index, &process_index))
+    {
+        printf("ping: no such process found\n");
+        return -1;
+    }
+
+    if (jobs[job_index].completed || jobs[job_index].processes[process_index].completed)
+    {
+        printf("ping: no such process found\n");
+        return -1;
+    }
+    /*
+     * Send the signal to this particular PID.
+     */
+    if (kill(pid, actual_signal) == -1)
+    {
+        if (errno == ESRCH)
+        {
+            printf("ping: no such process found\n");
+            return -1;
+        }
+        printf("ping: no such process found\n");
+        return -1;
+    }
+    printf("Sent signal %ld to %s\n",signal_number,target);
+    fflush(stdout);
+    return 0;
+}
 int resume_job(int job_number, int foreground, int timeout_seconds)
 {
     sigset_t block_set;
     sigset_t old_set;
-
     sigemptyset(&block_set);
     sigaddset(&block_set, SIGCHLD);
-
     sigprocmask(SIG_BLOCK, &block_set, &old_set);
-
     int job_index = find_job_by_number(job_number);
 
     if (job_index == -1)
     {
         sigprocmask(SIG_SETMASK, &old_set, NULL);
-
         printf("resume: no such job\n");
         fflush(stdout);
-
         return -1;
     }
-
     BackgroundJob *job = &jobs[job_index];
 
     if (job->completed)
@@ -723,12 +760,6 @@ int resume_job(int job_number, int foreground, int timeout_seconds)
         return -1;
     }
 
-    /*
-     * Continue the entire process group.
-     *
-     * SIGCONT is harmless if the processes are
-     * already running.
-     */
     if (kill(-job->pgid, SIGCONT) == -1)
     {
         sigprocmask(SIG_SETMASK, &old_set, NULL);
@@ -745,11 +776,8 @@ int resume_job(int job_number, int foreground, int timeout_seconds)
     job->stopped = 0;
 
     for (int i = 0; i < job->process_count; i++)
-    {
-        job->processes[i].stopped = 0;
-    }
-
-    /*
+    job->processes[i].stopped = 0;
+        /*
      * Background resume.
      */
     if (!foreground)
@@ -809,14 +837,7 @@ int resume_job(int job_number, int foreground, int timeout_seconds)
     sigprocmask(SIG_SETMASK, &old_set, NULL);
 
     int status = 0;
-
-    int stopped =
-        wait_for_foreground_job(
-            job->pgid,
-            job->process_count,
-            &status
-        );
-
+    int stopped =wait_for_foreground_job(job->pgid,job->process_count,&status );
     /*
      * Stop the alarm if the job finished/stopped normally.
      */
@@ -839,29 +860,15 @@ int resume_job(int job_number, int foreground, int timeout_seconds)
     {
         job->stopped = 1;
         job->status = status;
-
         for (int i = 0; i < job->process_count; i++)
-        {
-            job->processes[i].stopped = 1;
-        }
-
-        printf("[%d] + Stopped    %s\n",
-               job->job_number,
-               job->command);
-
+        job->processes[i].stopped = 1;
+        printf("[%d] + Stopped    %s\n",job->job_number,job->command);
         fflush(stdout);
     }
     else
     {
-        /*
-         * Job finished.
-         *
-         * Mark every process completed so that
-         * activities() removes the whole job.
-         */
         job->completed = 1;
         job->status = status;
-
         for (int i = 0; i < job->process_count; i++)
         {
             job->processes[i].completed = 1;

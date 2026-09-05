@@ -42,8 +42,6 @@ int execute_one_command(Token *tokens)
             return -1;
 
         activities();
-        
-
         return 0;
     }
     /* resume */
@@ -79,20 +77,13 @@ int execute_one_command(Token *tokens)
         * Parse the job number.
         */
         char *endptr;
-
-        long job_number =
-            strtol(job_text + 1, &endptr, 10);
-
-        if (job_text[1] == '\0' ||
-            *endptr != '\0' ||
-            job_number <= 0)
+        long job_number =strtol(job_text + 1, &endptr, 10);
+        if (job_text[1] == '\0' || *endptr != '\0' || job_number <= 0)
         {
             printf("resume: invalid syntax\n");
             return -1;
         }
-
         current = current->next;
-
         /*
         * Need fg or bg.
         */
@@ -102,17 +93,11 @@ int execute_one_command(Token *tokens)
             printf("resume: invalid syntax\n");
             return -1;
         }
-
         int foreground;
-
         if (strcmp(current->value, "fg") == 0)
-        {
-            foreground = 1;
-        }
+        foreground = 1;
         else if (strcmp(current->value, "bg") == 0)
-        {
-            foreground = 0;
-        }
+        foreground = 0;
         else
         {
             printf("resume: invalid syntax\n");
@@ -120,7 +105,6 @@ int execute_one_command(Token *tokens)
         }
 
         current = current->next;
-
         int timeout_seconds = 0;
 
         /*
@@ -139,51 +123,65 @@ int execute_one_command(Token *tokens)
                 printf("resume: invalid syntax\n");
                 return -1;
             }
-
             current = current->next;
-
             /*
             * Need timeout number.
             */
-            if (current == NULL ||
-                current->type != TOKEN_WORD)
+            if (current == NULL || current->type != TOKEN_WORD)
             {
                 printf("resume: invalid syntax\n");
                 return -1;
             }
-
             endptr = NULL;
-
-            long timeout =
-                strtol(current->value, &endptr, 10);
-
-            if (current->value[0] == '\0' ||
-                *endptr != '\0' ||
-                timeout <= 0)
+            long timeout = strtol(current->value, &endptr, 10);
+            if (current->value[0] == '\0' || *endptr != '\0' || timeout <= 0)
             {
                 printf("resume: invalid syntax\n");
                 return -1;
             }
-
             timeout_seconds = (int)timeout;
-
             current = current->next;
         }
-
-        /*
-        * There must be nothing after the command.
-        */
         if (current != NULL)
         {
             printf("resume: invalid syntax\n");
             return -1;
         }
+        return resume_job((int)job_number,foreground,timeout_seconds);
+    }
+        /* ping */
+    if (tokens->type == TOKEN_WORD && strcmp(tokens->value, "ping") == 0)
+    {
+        Token *current = tokens->next;
 
-        return resume_job(
-            (int)job_number,
-            foreground,
-            timeout_seconds
-        );
+        if (current == NULL || current->type != TOKEN_WORD)
+        {
+            printf("ping: invalid syntax\n");
+            return -1;
+        }
+        char *target = current->value;
+        current = current->next;
+
+        /*
+         * Need signal number.
+         */
+        if (current == NULL || current->type != TOKEN_WORD)
+        {
+            printf("ping: invalid syntax\n");
+            return -1;
+        }
+        char *signal_text = current->value;
+        current = current->next;
+
+        /*
+         * Nothing should come after signal_number.
+         */
+        if (current != NULL)
+        {
+            printf("ping: invalid syntax\n");
+            return -1;
+        }
+        return ping_job(target, signal_text);
     }
     
     //hop
@@ -581,26 +579,18 @@ int main(void)
     init_shell_signals();
     init_job_control();
     init_background();
-
-
-
     char *line = NULL;
     size_t size = 0;
     init_prompt();
     int stopped_job_warning = 0;
     while (1)
     {
+        print_pending_background_jobs();
+
         print_prompt();
 
         if (getline(&line, &size, stdin) == -1)
         {
-            /*
-            * Check EOF FIRST.
-            *
-            * errno may still contain EINTR from an earlier
-            * interrupted getline(), so errno must not be checked
-            * before feof().
-            */
             if (feof(stdin))
             {
                 clearerr(stdin);
@@ -612,38 +602,18 @@ int main(void)
                 {
                     printf("cshell: there are stopped jobs\n");
                     fflush(stdout);
-
                     if (stopped_job_warning)
                         break;
-
                     stopped_job_warning = 1;
-
                     continue;
                 }
-
-                /*
-                * No stopped jobs -> exit.
-                */
                 break;
             }
-
-            /*
-            * getline() was interrupted by a signal.
-            */
             if (errno == EINTR)
             {
                 clearerr(stdin);
-
-                printf("\n");
-
-                print_pending_background_jobs();
-
                 continue;
             }
-
-            /*
-            * Other getline error.
-            */
             clearerr(stdin);
             continue;
         }
@@ -661,15 +631,7 @@ int main(void)
             free_tokens(tokens);
             continue;
         }
-        /*
-        * Execute commands separated by ';' and '&'.
-        *
-        * ';' -> foreground
-        *
-        * '&' -> background
-        */
         Token *current = tokens;
-
         while (current != NULL)
         {
             Token *command_start = current;
@@ -677,116 +639,43 @@ int main(void)
             Token *separator = current;
             Token *prev = NULL;
 
-    /*
-     * Find either:
-     *
-     * TOKEN_SEMI
-     *
-     * or
-     *
-     * TOKEN_AMP
-     */
-            while (separator != NULL &&
-           separator->type != TOKEN_SEMI &&
-           separator->type != TOKEN_AMP)
+            while (separator != NULL && separator->type != TOKEN_SEMI && separator->type != TOKEN_AMP)
             {       
                 prev = separator;
                 separator = separator->next;
             }
-
-    /*
-     * Remember what comes after the separator.
-     */
             Token *next_command = NULL;
-
             if (separator != NULL)
             next_command = separator->next;
 
-    /*
-     * Disconnect the current command from the rest
-     * of the token list.
-     *
-     * Example:
-     *
-     * echo hello -> AMP -> sleep -> 10
-     *
-     * becomes:
-     *
-     * echo hello -> NULL
-     */
             if (separator != NULL && prev != NULL)
             prev->next = NULL;
-
-    /*
-     * Determine whether this command should run
-     * in the background.
-     */
             int is_background = 0;
-
-            if (separator != NULL &&
-            separator->type == TOKEN_AMP)
-            {
-                is_background = 1;
-            }
-
+            if (separator != NULL && separator->type == TOKEN_AMP)
+            is_background = 1;
             int result;
 
             if (is_background)
-            {
-        /*
-         * Background command.
-         *
-         * We do NOT wait here.
-         */
-                result = launch_background_command(command_start);
-            }
+            result = launch_background_command(command_start);
             else
             {
-        /*
-         * Foreground command.
-         */
-
                 set_foreground_running(1);
-
                 result = execute_one_command(command_start);
-
                 set_foreground_running(0);
-
-        /*
-         * If background processes finished while
-         * this foreground command was running,
-         * report them NOW.
-         */
                 print_pending_background_jobs();
             }
 
-    /*
-     * Restore linked list.
-     */
             if (separator != NULL && prev != NULL)
             prev->next = separator;
 
-    /*
-     * If execution failed, stop.
-     */
             if (result != 0)
             break;
-
-    /*
-     * No separator means this was the last command.
-     */
             if (separator == NULL)
             break;
-
-    /*
-     * Move to the command after ';' or '&'.
-     */
             current = next_command;
         }
     }
     send_sighup_to_jobs();
-
     free(line);
-
     return 0;
 }
