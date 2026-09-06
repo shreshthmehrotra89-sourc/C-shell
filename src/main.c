@@ -15,6 +15,7 @@
 #include "background.h"
 #include "activities.h"
 #include <errno.h>
+#include "spy.h"
 
 int execute_one_command(Token *tokens)
 {
@@ -42,6 +43,55 @@ int execute_one_command(Token *tokens)
             return -1;
 
         activities();
+        return 0;
+    }
+    /* spy */
+    if (tokens->type == TOKEN_WORD &&
+        strcmp(tokens->value, "spy") == 0)
+    {
+        int argc = 0;
+
+        Token *current = tokens;
+
+        while (current != NULL)
+        {
+            if (current->type != TOKEN_WORD)
+            {
+                printf("spy: invalid syntax\n");
+                return -1;
+            }
+
+            argc++;
+            current = current->next;
+        }
+
+        /*
+        * argv needs:
+        *
+        * spy
+        * spy PID
+        *
+        * plus NULL at the end.
+        */
+        char **args = malloc(sizeof(char *) * (argc + 1));
+
+        if (args == NULL)
+            return -1;
+
+        current = tokens;
+
+        for (int i = 0; i < argc; i++)
+        {
+            args[i] = current->value;
+            current = current->next;
+        }
+
+        args[argc] = NULL;
+
+        spy_command(args);
+
+        free(args);
+
         return 0;
     }
     /* resume */
