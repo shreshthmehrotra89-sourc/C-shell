@@ -16,6 +16,7 @@
 #include "activities.h"
 #include <errno.h>
 #include "spy.h"
+#include "snoop.h"
 
 int execute_one_command(Token *tokens)
 {
@@ -36,8 +37,7 @@ int execute_one_command(Token *tokens)
     if (has_pipe)
     return execute_pipeline(tokens);
 
-    if (tokens->type == TOKEN_WORD &&
-    strcmp(tokens->value, "activities") == 0)
+    if (tokens->type == TOKEN_WORD && strcmp(tokens->value, "activities") == 0)
     {
         if (tokens->next != NULL)
             return -1;
@@ -46,13 +46,10 @@ int execute_one_command(Token *tokens)
         return 0;
     }
     /* spy */
-    if (tokens->type == TOKEN_WORD &&
-        strcmp(tokens->value, "spy") == 0)
+    if (tokens->type == TOKEN_WORD && strcmp(tokens->value, "spy") == 0)
     {
         int argc = 0;
-
         Token *current = tokens;
-
         while (current != NULL)
         {
             if (current->type != TOKEN_WORD)
@@ -60,7 +57,6 @@ int execute_one_command(Token *tokens)
                 printf("spy: invalid syntax\n");
                 return -1;
             }
-
             argc++;
             current = current->next;
         }
@@ -74,7 +70,6 @@ int execute_one_command(Token *tokens)
         * plus NULL at the end.
         */
         char **args = malloc(sizeof(char *) * (argc + 1));
-
         if (args == NULL)
             return -1;
 
@@ -87,16 +82,63 @@ int execute_one_command(Token *tokens)
         }
 
         args[argc] = NULL;
-
         spy_command(args);
-
         free(args);
-
         return 0;
     }
+    /* snoop */
+    if (tokens->type == TOKEN_WORD && strcmp(tokens->value, "snoop") == 0)
+    {
+        int argc = 0;
+        Token *current = tokens;
+        while (current != NULL)
+        {
+            /*
+            * snoop does not accept pipes,
+            * redirection operators, etc.
+            */
+            if (current->type != TOKEN_WORD)
+            {
+                printf("snoop: invalid syntax\n");
+                return -1;
+            }
+            argc++;
+            current = current->next;
+        }
+
+        /*
+        * Need at least:
+        *
+        * snoop command
+        *
+        * or:
+        *
+        * snoop -p pid
+        */
+        if (argc < 2)
+        {
+            printf("snoop: invalid syntax\n");
+            return -1;
+        }
+        char **args =malloc(sizeof(char *) * (argc + 1));
+        if (args == NULL)
+            return -1;
+        current = tokens;
+        for (int i = 0; i < argc; i++)
+        {
+            args[i] = current->value;
+            current = current->next;
+        }
+        args[argc] = NULL;
+        /*
+        * snoop is a foreground synchronous command.
+        */
+        int result = snoop_command(args);
+        free(args);
+        return result;
+    }
     /* resume */
-    if (tokens->type == TOKEN_WORD &&
-        strcmp(tokens->value, "resume") == 0)
+    if (tokens->type == TOKEN_WORD && strcmp(tokens->value, "resume") == 0)
     {
         Token *current = tokens->next;
 
@@ -105,8 +147,7 @@ int execute_one_command(Token *tokens)
         *
         * resume %N fg/bg
         */
-        if (current == NULL ||
-            current->type != TOKEN_WORD)
+        if (current == NULL || current->type != TOKEN_WORD)
         {
             printf("resume: invalid syntax\n");
             return -1;
@@ -137,8 +178,7 @@ int execute_one_command(Token *tokens)
         /*
         * Need fg or bg.
         */
-        if (current == NULL ||
-            current->type != TOKEN_WORD)
+        if (current == NULL ||  current->type != TOKEN_WORD)
         {
             printf("resume: invalid syntax\n");
             return -1;
@@ -233,7 +273,6 @@ int execute_one_command(Token *tokens)
         }
         return ping_job(target, signal_text);
     }
-    
     //hop
     if (tokens->type == TOKEN_WORD && strcmp(tokens->value, "hop") == 0)
     {
@@ -472,68 +511,41 @@ int execute_one_background_command(Token *tokens)
     while (current != NULL)
     {
         if (current->type == TOKEN_WORD)
-        {
-            argc++;
-        }
+        argc++;
         else if (current->type == TOKEN_LT)
         {
             current = current->next;
-
-            if (current != NULL &&
-                current->type == TOKEN_WORD)
-            {
-                input_count++;
-            }
+            if (current != NULL && current->type == TOKEN_WORD)
+            input_count++;
         }
-        else if (current->type == TOKEN_GT ||
-                 current->type == TOKEN_GTGT)
+        else if (current->type == TOKEN_GT || current->type == TOKEN_GTGT)
         {
             current = current->next;
-
-            if (current != NULL &&
-                current->type == TOKEN_WORD)
-            {
-                output_count++;
-            }
+            if (current != NULL && current->type == TOKEN_WORD)
+            output_count++;
         }
-
         current = current->next;
     }
-
-    char **args =
-        malloc(sizeof(char *) * (argc + 1));
-
+    char **args =malloc(sizeof(char *) * (argc + 1));
     char **input_files = NULL;
 
     if (input_count > 0)
-    {
-        input_files =
-            malloc(sizeof(char *) * input_count);
-    }
-
+    input_files =malloc(sizeof(char *) * input_count);
     char **output_files = NULL;
     int *output_append = NULL;
 
     if (output_count > 0)
     {
-        output_files =
-            malloc(sizeof(char *) * output_count);
-
-        output_append =
-            malloc(sizeof(int) * output_count);
+        output_files =malloc(sizeof(char *) * output_count);
+        output_append =malloc(sizeof(int) * output_count);
     }
 
-    if (args == NULL ||
-        (input_count > 0 && input_files == NULL) ||
-        (output_count > 0 &&
-         (output_files == NULL ||
-          output_append == NULL)))
+    if (args == NULL || (input_count > 0 && input_files == NULL) || (output_count > 0 && (output_files == NULL || output_append == NULL)))
     {
         free(args);
         free(input_files);
         free(output_files);
         free(output_append);
-
         return -1;
     }
 
@@ -542,58 +554,39 @@ int execute_one_background_command(Token *tokens)
     int output_index = 0;
 
     current = tokens;
-
     while (current != NULL)
     {
         if (current->type == TOKEN_WORD)
-        {
-            args[arg_index++] = current->value;
-        }
+        args[arg_index++] = current->value;
         else if (current->type == TOKEN_LT)
         {
             current = current->next;
 
-            if (current != NULL &&
-                current->type == TOKEN_WORD)
-            {
-                input_files[input_index++] =
-                    current->value;
-            }
+            if (current != NULL && current->type == TOKEN_WORD)
+            input_files[input_index++] =current->value;
         }
         else if (current->type == TOKEN_GT)
         {
             current = current->next;
-
-            if (current != NULL &&
-                current->type == TOKEN_WORD)
+            if (current != NULL && current->type == TOKEN_WORD)
             {
-                output_files[output_index] =
-                    current->value;
-
+                output_files[output_index] =current->value;
                 output_append[output_index] = 0;
-
                 output_index++;
             }
         }
         else if (current->type == TOKEN_GTGT)
         {
             current = current->next;
-
-            if (current != NULL &&
-                current->type == TOKEN_WORD)
+            if (current != NULL && current->type == TOKEN_WORD)
             {
-                output_files[output_index] =
-                    current->value;
-
+                output_files[output_index] =current->value;
                 output_append[output_index] = 1;
-
                 output_index++;
             }
         }
-
         current = current->next;
     }
-
     args[arg_index] = NULL;
 
     /*
@@ -602,14 +595,7 @@ int execute_one_background_command(Token *tokens)
      * This does NOT wait.
      * It does NOT change terminal ownership.
      */
-    execute_background_command(
-        args,
-        input_files,
-        input_count,
-        output_files,
-        output_append,
-        output_count
-    );
+    execute_background_command(args,input_files,input_count,output_files,output_append,output_count);
 
     /*
      * Normally never reached because
@@ -633,10 +619,10 @@ int main(void)
     size_t size = 0;
     init_prompt();
     int stopped_job_warning = 0;
+
     while (1)
     {
         print_pending_background_jobs();
-
         print_prompt();
 
         if (getline(&line, &size, stdin) == -1)
@@ -644,7 +630,6 @@ int main(void)
             if (feof(stdin))
             {
                 clearerr(stdin);
-
                 /*
                 * Ctrl-D.
                 */
@@ -685,7 +670,6 @@ int main(void)
         while (current != NULL)
         {
             Token *command_start = current;
-
             Token *separator = current;
             Token *prev = NULL;
 
@@ -717,7 +701,6 @@ int main(void)
 
             if (separator != NULL && prev != NULL)
             prev->next = separator;
-
             if (result != 0)
             break;
             if (separator == NULL)
