@@ -590,7 +590,7 @@ static int find_job_by_number(int job_number)
     for (int i = 0; i < job_count; i++)
     {
         if (jobs[i].job_number == job_number)
-            return i;
+        return i;
     }
 
     return -1;
@@ -753,23 +753,18 @@ int resume_job(int job_number, int foreground, int timeout_seconds)
     if (job->completed)
     {
         sigprocmask(SIG_SETMASK, &old_set, NULL);
-
         printf("resume: no such job\n");
         fflush(stdout);
-
         return -1;
     }
 
     if (kill(-job->pgid, SIGCONT) == -1)
     {
         sigprocmask(SIG_SETMASK, &old_set, NULL);
-
         printf("resume: no such job\n");
         fflush(stdout);
-
         return -1;
     }
-
     /*
      * The job is now running.
      */
@@ -782,17 +777,13 @@ int resume_job(int job_number, int foreground, int timeout_seconds)
      */
     if (!foreground)
     {
-        printf("[%d] + Running    %s\n",
-               job->job_number,
-               job->command);
-
+        printf("[%d] + Running    %s\n",job->job_number,job->command);
         fflush(stdout);
 
         /*
          * Unblock SIGCHLD only after printing.
          */
         sigprocmask(SIG_SETMASK, &old_set, NULL);
-
         return 0;
     }
 
@@ -800,7 +791,6 @@ int resume_job(int job_number, int foreground, int timeout_seconds)
      * Foreground resume.
      */
     set_foreground_running(1);
-
     resume_pgid = job->pgid;
     resume_timed_out = 0;
 

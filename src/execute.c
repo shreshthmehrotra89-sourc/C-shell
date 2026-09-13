@@ -13,7 +13,6 @@
 #define OUTPUT_TEMP_FILE "/tmp/cshell_output.tmp"
 #define MAX_OUTPUT_FILES 100
 
-
 int execute_command(char **argv,char **input_files,int input_count,char **output_files,int *output_append,int output_count)
 {
     if (argv == NULL || argv[0] == NULL)
@@ -89,17 +88,12 @@ int execute_command(char **argv,char **input_files,int input_count,char **output
     if (pid == 0)
     {
         setpgid(0, 0);
-
-            /*
-     * Restore default terminal signal behaviour.
-     */
+        /*
+        * Restore default terminal signal behaviour.
+        */
         signal(SIGINT, SIG_DFL);
         signal(SIGTSTP, SIG_DFL);
         signal(SIGTTOU, SIG_DFL);
-
-
-
-
         if (input_fd != -1)
         {
             if (dup2(input_fd, STDIN_FILENO) == -1)
@@ -128,75 +122,46 @@ int execute_command(char **argv,char **input_files,int input_count,char **output
     else
     {
         setpgid(pid, pid);
-
-    /*
-     * Give terminal to foreground process group.
-     */
-    if (tcsetpgrp(STDIN_FILENO, pid) == -1)
-    {
+        /*
+        * Give terminal to foreground process group.
+        */
+        if (tcsetpgrp(STDIN_FILENO, pid) == -1)
         perror("cshell: tcsetpgrp");
-    }
-
-    int status;
-
-    /*
-     * WUNTRACED is essential for Ctrl-Z.
-     */
-    if (waitpid(pid, &status, WUNTRACED) == -1)
-    {
+        int status;
+        /*
+        * WUNTRACED is essential for Ctrl-Z.
+        */
+        if (waitpid(pid, &status, WUNTRACED) == -1)
         perror("cshell: waitpid");
-    }
-
-    /*
-     * Shell gets terminal back.
-     */
-    if (tcsetpgrp(STDIN_FILENO, shell_pgid) == -1)
-    {
+        /*
+        * Shell gets terminal back.
+        */
+        if (tcsetpgrp(STDIN_FILENO, shell_pgid) == -1)
         perror("cshell: tcsetpgrp");
-    }
-
-    if (WIFSTOPPED(status))
-{
-    char command_line[4096];
-command_line[0] = '\0';
-
-for (int i = 0; argv[i] != NULL; i++)
-{
-    if (i > 0)
-        strncat(command_line, " ",
-                sizeof(command_line) - strlen(command_line) - 1);
-
-    strncat(command_line,
-            argv[i],
-            sizeof(command_line) - strlen(command_line) - 1);
-}
-    int job_index =
-        create_background_job(
-            pid,
-            pid,
-            command_line
-        );
-
-    if (job_index != -1)
-    {
-        add_background_process(
-            job_index,
-            pid,
-            command_line
-        );
-        jobs[job_index].processes[0].stopped = 1;
-        jobs[job_index].stopped = 1;
-
-        printf("[%d] + Stopped %s\n",
-               jobs[job_index].job_number,
-               argv[0]);
-
-        fflush(stdout);
-    }
-    return 0;
-}
-
         
+        if (WIFSTOPPED(status))
+        {
+            char command_line[4096];
+            command_line[0] = '\0';
+
+            for (int i = 0; argv[i] != NULL; i++)
+            {
+                if (i > 0)
+                strncat(command_line, " ",sizeof(command_line) - strlen(command_line) - 1);
+                strncat(command_line,argv[i],sizeof(command_line) - strlen(command_line) - 1);
+            }
+            int job_index =create_background_job(pid,pid,command_line);
+            if (job_index != -1)
+            {
+                add_background_process(job_index,pid,command_line);
+                jobs[job_index].processes[0].stopped = 1;
+                jobs[job_index].stopped = 1;
+
+                printf("[%d] + Stopped %s\n",jobs[job_index].job_number,argv[0]);
+                fflush(stdout);
+            }
+            return 0;
+        }
         if (input_fd != -1)
         {
             close(input_fd);
@@ -214,11 +179,7 @@ for (int i = 0; argv[i] != NULL; i++)
     }
 }
 
-void execute_background_command(char **argv,
-                                char **input_files,
-                                int input_count,
-                                char **output_files,
-                                int *output_append,
+void execute_background_command(char **argv,char **input_files,int input_count,char **output_files,int *output_append,
                                 int output_count)
 {
     if (argv == NULL || argv[0] == NULL)
@@ -226,92 +187,68 @@ void execute_background_command(char **argv,
 
     char *command = argv[0];
     char local_path[4096];
-
     /*
      * Same command-path handling as execute_command().
      */
     if (command[0] == '%')
     {
         command++;
-
         if (command[0] == '\0')
         {
             printf("cshell: command not found ()\n");
             _exit(EXIT_FAILURE);
         }
-
         argv[0] = command;
     }
     else if (strchr(command, '/') != NULL)
     {
         if (access(command, X_OK) != 0)
         {
-            printf("cshell: command not found (%s)\n",
-                   command);
+            printf("cshell: command not found (%s)\n",command);
             _exit(EXIT_FAILURE);
         }
     }
     else
     {
-        snprintf(local_path,
-                 sizeof(local_path),
-                 "./%s",
-                 command);
-
+        snprintf(local_path,sizeof(local_path),"./%s",command);
         if (access(local_path, X_OK) == 0)
-            argv[0] = local_path;
+        argv[0] = local_path;
     }
-
     /*
      * Input redirection.
      */
     int input_fd = -1;
-
     if (input_count > 0)
     {
-        input_fd =
-            handle_input_redirection(input_files,
-                                     input_count);
-
+        input_fd =handle_input_redirection(input_files,input_count);
         if (input_fd == -1)
-            _exit(EXIT_FAILURE);
+        _exit(EXIT_FAILURE);
     }
 
     /*
      * Output redirection.
      */
     int output_fds[MAX_OUTPUT_FILES];
-
     if (output_count > 0)
     {
-        if (open_output_files(output_files,
-                              output_append,
-                              output_count,
-                              output_fds) == -1)
+        if (open_output_files(output_files,output_append,output_count,output_fds) == -1)
         {
             if (input_fd != -1)
             {
                 close(input_fd);
                 unlink("/tmp/cshell_input.tmp");
             }
-
             _exit(EXIT_FAILURE);
         }
     }
-
     /*
      * Same temporary output mechanism
      * as the foreground executor.
      */
     int output_temp_fd = -1;
-
     if (output_count > 0)
     {
-        output_temp_fd =
-            open(OUTPUT_TEMP_FILE,
-                 O_CREAT | O_RDWR | O_TRUNC,
-                 0600);
-
+        output_temp_fd =open(OUTPUT_TEMP_FILE,O_CREAT | O_RDWR | O_TRUNC,0600);
         if (output_temp_fd == -1)
         {
             perror("cshell");
@@ -321,18 +258,11 @@ void execute_background_command(char **argv,
                 close(input_fd);
                 unlink("/tmp/cshell_input.tmp");
             }
-
-            for (int i = 0;
-                 i < output_count;
-                 i++)
-            {
-                close(output_fds[i]);
-            }
-
+            for (int i = 0;i < output_count;i++)
+            close(output_fds[i]);
             _exit(EXIT_FAILURE);
         }
     }
-
     /*
      * Apply input redirection.
      */
@@ -343,10 +273,8 @@ void execute_background_command(char **argv,
             perror("cshell: dup2");
             _exit(EXIT_FAILURE);
         }
-
         close(input_fd);
     }
-
     /*
      * Apply output redirection.
      */
@@ -357,7 +285,6 @@ void execute_background_command(char **argv,
             perror("cshell: dup2");
             _exit(EXIT_FAILURE);
         }
-
         close(output_temp_fd);
     }
 
@@ -372,12 +299,9 @@ void execute_background_command(char **argv,
      */
 
     if (strchr(argv[0], '/') != NULL)
-        execv(argv[0], argv);
+    execv(argv[0], argv);
     else
-        execvp(argv[0], argv);
-
-    printf("cshell: command not found (%s)\n",
-           command);
-
+    execvp(argv[0], argv);
+    printf("cshell: command not found (%s)\n",command);
     _exit(EXIT_FAILURE);
 }

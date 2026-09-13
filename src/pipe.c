@@ -200,11 +200,9 @@ int setup_input(PipelineCommand *command)
         {
             close(fd);
             close(temp_fd);
-
             perror("cshell");
             return -1;
         }
-
         char *line = NULL;
         size_t size = 0;
         ssize_t len;
@@ -456,18 +454,13 @@ void execute_pipeline_child(PipelineCommand *command,int command_index,int comma
  * In background mode, the PID of the FIRST pipeline
  * command is written to pid_write_fd.
  */
-static int execute_pipeline_internal(Token *tokens,
-                                      int pid_write_fd)
+static int execute_pipeline_internal(Token *tokens,int pid_write_fd)
 {
     if (tokens == NULL)
         return -1;
 
-    int command_count =
-        count_commands(tokens);
-
-    int pipe_count =
-        command_count - 1;
-
+    int command_count =count_commands(tokens);
+    int pipe_count =command_count - 1;
     int pipe_fds[pipe_count][2];
 
     /*
@@ -492,10 +485,7 @@ static int execute_pipeline_internal(Token *tokens,
     /*
      * Allocate information for every command.
      */
-    PipelineCommand *commands =
-        calloc(command_count,
-               sizeof(PipelineCommand));
-
+    PipelineCommand *commands =calloc(command_count,sizeof(PipelineCommand));
     if (commands == NULL)
     {
         printf("cshell: memory allocation failed\n");
@@ -517,16 +507,11 @@ static int execute_pipeline_internal(Token *tokens,
     for (int i = 0; i < command_count; i++)
     {
         Token *next_start = NULL;
-
-        if (parse_command(current,
-                          &commands[i],
-                          &next_start) == -1)
+        if (parse_command(current,&commands[i],&next_start) == -1)
         {
             printf("cshell: memory allocation failed\n");
-
             for (int j = 0; j <= i; j++)
                 free_command(&commands[j]);
-
             free(commands);
 
             for (int j = 0; j < pipe_count; j++)
@@ -534,10 +519,8 @@ static int execute_pipeline_internal(Token *tokens,
                 close(pipe_fds[j][0]);
                 close(pipe_fds[j][1]);
             }
-
             return -1;
         }
-
         current = next_start;
     }
 
@@ -577,29 +560,22 @@ static int execute_pipeline_internal(Token *tokens,
     /*
      * Store PID of every pipeline process.
      */
-    pid_t *pids =
-        malloc(sizeof(pid_t) * command_count);
-
+    pid_t *pids =malloc(sizeof(pid_t) * command_count);
     if (pids == NULL)
     {
         printf("cshell: memory allocation failed\n");
-
         for (int i = 0; i < command_count; i++)
         {
             if (commands[i].output_temp_fd != -1)
-                close(commands[i].output_temp_fd);
-
+            close(commands[i].output_temp_fd);
             free_command(&commands[i]);
         }
-
         free(commands);
-
         for (int i = 0; i < pipe_count; i++)
         {
             close(pipe_fds[i][0]);
             close(pipe_fds[i][1]);
         }
-
         return -1;
     }
 
@@ -609,11 +585,9 @@ static int execute_pipeline_internal(Token *tokens,
     for (int i = 0; i < command_count; i++)
     {
         pid_t pid = fork();
-
         if (pid == -1)
         {
             perror("cshell");
-
             /*
              * Close pipes.
              */
@@ -633,12 +607,12 @@ static int execute_pipeline_internal(Token *tokens,
             if (pid_write_fd == -1)
             {
                 for (int j = 0; j < i; j++)
-                    waitpid(pids[j], NULL, 0);
+                waitpid(pids[j], NULL, 0);
             }
             else
             {
                 for (int j = 0; j < i; j++)
-                    kill(pids[j], SIGTERM);
+                kill(pids[j], SIGTERM);
             }
 
             free(pids);
@@ -646,7 +620,7 @@ static int execute_pipeline_internal(Token *tokens,
             for (int j = 0; j < command_count; j++)
             {
                 if (commands[j].output_temp_fd != -1)
-                    close(commands[j].output_temp_fd);
+                close(commands[j].output_temp_fd);
 
                 free_command(&commands[j]);
             }
@@ -654,7 +628,7 @@ static int execute_pipeline_internal(Token *tokens,
             free(commands);
 
             if (pid_write_fd != -1)
-                close(pid_write_fd);
+            close(pid_write_fd);
 
             return -1;
         }
@@ -662,45 +636,29 @@ static int execute_pipeline_internal(Token *tokens,
         if (pid == 0)
         {
             if (i == 0)
-    {
-        setpgid(0, 0);
-    }
-    else
-    {
-        setpgid(0, pgid);
-    }
-
-    /*
-     * Children must receive Ctrl-C / Ctrl-Z.
-     */
-    signal(SIGINT, SIG_DFL);
-    signal(SIGTSTP, SIG_DFL);
-    signal(SIGTTOU, SIG_DFL);
+            setpgid(0, 0);
+            else
+            setpgid(0, pgid);
             /*
+            * Children must receive Ctrl-C / Ctrl-Z.
+            */
+            signal(SIGINT, SIG_DFL);
+            signal(SIGTSTP, SIG_DFL);
+            signal(SIGTTOU, SIG_DFL);
+                /*
              * Actual pipeline child.
              */
-            execute_pipeline_child(
-                &commands[i],
-                i,
-                command_count,
-                pipe_fds,
-                pipe_count
-            );
-
+            execute_pipeline_child(&commands[i],i,command_count,pipe_fds,pipe_count);
             exit(EXIT_FAILURE);
         }
-
         /*
- * Parent stores PID and creates the process group.
- */
-if (i == 0)
-    pgid = pid;
-
-setpgid(pid, pgid);
-
-pids[i] = pid;
+        * Parent stores PID and creates the process group.
+        */
+        if (i == 0)
+        pgid = pid;
+        setpgid(pid, pgid);
+        pids[i] = pid;
     }
-
     /*
      * IMPORTANT:
      *
@@ -708,19 +666,11 @@ pids[i] = pid;
      */
     if (pid_write_fd != -1)
     {
-        ssize_t written =
-            write(pid_write_fd,
-                  &pids[0],
-                  sizeof(pids[0]));
-
+        ssize_t written =write(pid_write_fd,&pids[0],sizeof(pids[0]));
         if (written != sizeof(pids[0]))
-        {
-            perror("cshell: unable to send pipeline pid");
-        }
-
+        perror("cshell: unable to send pipeline pid");
         close(pid_write_fd);
     }
-
     /*
      * Parent closes all pipe descriptors.
      */
@@ -745,70 +695,40 @@ pids[i] = pid;
      * background pipeline.
      */
 
-     /*
- * Give terminal to the foreground pipeline.
- */
+    /*
+    * Give terminal to the foreground pipeline.
+    */
     if (pid_write_fd == -1)
     {
         if (tcsetpgrp(STDIN_FILENO, pgid) == -1)
-        {
-            perror("cshell: tcsetpgrp");
-        }
+        perror("cshell: tcsetpgrp");
     }
     int job_status = 0;
 
-int stopped =
-    wait_for_foreground_job(
-        pgid,
-        command_count,
-        &job_status
-    );
-
+    int stopped =wait_for_foreground_job(pgid,command_count,&job_status);
     /*
- * Shell gets terminal back.
- */
-if (tcsetpgrp(STDIN_FILENO, shell_pgid) == -1)
-{
+    * Shell gets terminal back.
+    */
+    if (tcsetpgrp(STDIN_FILENO, shell_pgid) == -1)
     perror("cshell: tcsetpgrp");
-}
-     if (stopped)
-{
-    char command_name[4096];
-
-    snprintf(command_name,
-             sizeof(command_name),
-             "%s",
-             commands[0].argv[0]);
-
-    int job_index =
-        create_background_job(
-            pgid,
-            pids[0],
-            command_name
-        );
-
-    if (job_index != -1)
+    if (stopped)
     {
-        for (int i = 0; i < command_count; i++)
+        char command_name[4096];
+        snprintf(command_name,sizeof(command_name),"%s",commands[0].argv[0]);
+        int job_index =create_background_job(pgid,pids[0],command_name);
+        if (job_index != -1)
         {
-            add_background_process(
-                job_index,
-                pids[i],
-                commands[i].argv[0]
-            );
+            for (int i = 0; i < command_count; i++)
+            {
+                add_background_process(job_index,pids[i],commands[i].argv[0]);
+                jobs[job_index].processes[i].stopped = 1;
+            }
 
-            jobs[job_index].processes[i].stopped = 1;
+            jobs[job_index].stopped = 1;
+            printf("[%d] + Stopped %s\n",jobs[job_index].job_number,command_name);
+            fflush(stdout);
         }
-
-        jobs[job_index].stopped = 1;
-
-        printf("[%d] + Stopped %s\n",
-               jobs[job_index].job_number,
-               command_name);
-
-        fflush(stdout);
     }
-}
 
     /*
      * Now the entire pipeline has finished.
@@ -823,27 +743,20 @@ if (tcsetpgrp(STDIN_FILENO, shell_pgid) == -1)
             if (commands[i].output_count > 0)
             {
                 copy_output(&commands[i]);
-
                 close(commands[i].output_temp_fd);
-
                 commands[i].output_temp_fd = -1;
             }
         }
     }
-
     /*
      * Free command information.
      */
     for (int i = 0; i < command_count; i++)
-        free_command(&commands[i]);
-
+    free_command(&commands[i]);
     free(commands);
     free(pids);
-
     return 0;
 }
-
-
 /*
  * Normal foreground pipeline.
  *
@@ -853,28 +766,20 @@ int execute_pipeline(Token *tokens)
 {
     return execute_pipeline_internal(tokens, -1);
 }
-
-
 /*
  * Background pipeline.
  *
  * pid_write_fd is connected to the shell's background
  * manager.
  */
-int execute_pipeline_background(Token *tokens,
-                                int pid_write_fd)
+int execute_pipeline_background(Token *tokens,int pid_write_fd)
 {
-    return execute_pipeline_internal(tokens,
-                                     pid_write_fd);
+    return execute_pipeline_internal(tokens,pid_write_fd);
 }
 
-int launch_pipeline_processes(Token *tokens,
-                              pid_t *pids,
-                              int *process_count)
+int launch_pipeline_processes(Token *tokens,pid_t *pids,int *process_count)
 {
-    if (tokens == NULL ||
-        pids == NULL ||
-        process_count == NULL)
+    if (tokens == NULL || pids == NULL || process_count == NULL)
         return -1;
 
     int command_count = count_commands(tokens);
@@ -894,16 +799,11 @@ int launch_pipeline_processes(Token *tokens,
                 close(pipe_fds[j][0]);
                 close(pipe_fds[j][1]);
             }
-
             return -1;
         }
     }
-
     /* Allocate commands */
-    PipelineCommand *commands =
-        calloc(command_count,
-               sizeof(PipelineCommand));
-
+    PipelineCommand *commands =calloc(command_count,sizeof(PipelineCommand));
     if (commands == NULL)
     {
         perror("cshell: calloc");
@@ -924,15 +824,12 @@ int launch_pipeline_processes(Token *tokens,
     {
         Token *next_start = NULL;
 
-        if (parse_command(current,
-                          &commands[i],
-                          &next_start) == -1)
+        if (parse_command(current,&commands[i],&next_start) == -1)
         {
             for (int j = 0; j <= i; j++)
-                free_command(&commands[j]);
+            free_command(&commands[j]);
 
             free(commands);
-
             for (int j = 0; j < pipe_count; j++)
             {
                 close(pipe_fds[j][0]);
@@ -941,7 +838,6 @@ int launch_pipeline_processes(Token *tokens,
 
             return -1;
         }
-
         current = next_start;
     }
 
@@ -957,33 +853,26 @@ int launch_pipeline_processes(Token *tokens,
                 for (int j = 0; j < command_count; j++)
                 {
                     if (commands[j].output_temp_fd != -1)
-                        close(commands[j].output_temp_fd);
-
+                    close(commands[j].output_temp_fd);
                     free_command(&commands[j]);
                 }
-
                 free(commands);
-
                 for (int j = 0; j < pipe_count; j++)
                 {
                     close(pipe_fds[j][0]);
                     close(pipe_fds[j][1]);
                 }
-
                 return -1;
             }
         }
     }
-
     /*
      * Fork every pipeline command.
      */
     pid_t pgid = 0;
-
     for (int i = 0; i < command_count; i++)
     {
         pid_t pid = fork();
-
         if (pid == -1)
         {
             perror("cshell: fork");
@@ -995,18 +884,15 @@ int launch_pipeline_processes(Token *tokens,
             }
 
             for (int j = 0; j < i; j++)
-                kill(pids[j], SIGTERM);
+            kill(pids[j], SIGTERM);
 
             for (int j = 0; j < command_count; j++)
             {
                 if (commands[j].output_temp_fd != -1)
-                    close(commands[j].output_temp_fd);
-
+                close(commands[j].output_temp_fd);
                 free_command(&commands[j]);
             }
-
             free(commands);
-
             return -1;
         }
 
@@ -1016,9 +902,9 @@ int launch_pipeline_processes(Token *tokens,
              * First child becomes the process-group leader.
              */
             if (i == 0)
-                setpgid(0, 0);
+            setpgid(0, 0);
             else
-                setpgid(0, pgid);
+            setpgid(0, pgid);
             
                  /*
             * Children must receive Ctrl-C / Ctrl-Z normally.
@@ -1026,15 +912,7 @@ int launch_pipeline_processes(Token *tokens,
             signal(SIGINT, SIG_DFL);
             signal(SIGTSTP, SIG_DFL);
             signal(SIGTTOU, SIG_DFL);
-
-            execute_pipeline_child(
-                &commands[i],
-                i,
-                command_count,
-                pipe_fds,
-                pipe_count
-            );
-
+            execute_pipeline_child(&commands[i],i,command_count,pipe_fds,pipe_count);
             _exit(EXIT_FAILURE);
         }
 
@@ -1042,13 +920,11 @@ int launch_pipeline_processes(Token *tokens,
          * First child's PID becomes the PGID.
          */
         if (i == 0)
-            pgid = pid;
-
+        pgid = pid;
         /*
          * Parent also sets the child's process group.
          */
         setpgid(pid, pgid);
-
         pids[i] = pid;
     }
 
@@ -1070,15 +946,12 @@ int launch_pipeline_processes(Token *tokens,
     for (int i = 0; i < command_count; i++)
     {
         if (commands[i].output_temp_fd != -1)
-            close(commands[i].output_temp_fd);
-
+        close(commands[i].output_temp_fd);
         free_command(&commands[i]);
     }
 
     free(commands);
-
     *process_count = command_count;
-
     return 0;
 }
 

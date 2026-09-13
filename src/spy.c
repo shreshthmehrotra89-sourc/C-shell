@@ -207,7 +207,6 @@ static void print_memory_maps(pid_t pid)
          * Find the beginning of the pathname.
          */
         char *path = strchr(line, '/');
-
         if (path == NULL)
             continue;
         /*
